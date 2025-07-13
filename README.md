@@ -36,8 +36,8 @@ A cutting-edge Model Context Protocol (MCP) server infrastructure designed to po
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/0x-Professor/mcp-servers.git
-cd mcp-servers
+git clone https://github.com/0x-Professor/MCPServers.git
+cd MCPServers
 
 # Set up environment
 uv venv
