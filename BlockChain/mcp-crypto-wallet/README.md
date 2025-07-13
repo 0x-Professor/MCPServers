@@ -37,23 +37,30 @@ A high-performance, secure, and extensible crypto wallet implementation built on
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-crypto-wallet.git
+git clone https://github.com/0x-Professor/MCPServers.git
+cd BlockChain
 cd mcp-crypto-wallet
 
+# Set up environment variables
+uv venv
+
 # Install dependencies
-npm install
+uv add -r requirements.txt
 # or
-yarn install
+uvx add -r requirements.txt
 
 # Set up environment variables
 cp .env.example .env
+add your API KEY and Private key of Wallet 
 # Edit .env with your configuration
+ALCHEMY_API_KEY= "You can use any key "
+PRIVATE_KEY=
 
 # Start the MCP server
-npm start
+uv run mcp dev filename.py
 ```
 
-## 📚 API Reference
+## 📚 MCP TOOLS Reference
 
 ### Wallet Management
 
@@ -170,12 +177,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Join our community to get help and discuss MCP server development:
 
-- [Discord](https://discord.gg/your-invite-link)
-- [Twitter](https://twitter.com/your-handle)
-- [GitHub Discussions](https://github.com/yourusername/mcp-crypto-wallet/discussions)
+- [Discord](https://discord.gg/your-invite-link)Coming Soon 
+- [Twitter](https://twitter.com/your-handle) Not Available 
+- [GitHub Discussions](https://github.com/0x-Professor/mcp-crypto-wallet/discussions)
 
 ## 🙏 Acknowledgments
 
-- Built with ❤️ using [ethers.js](https://docs.ethers.org/)
+- Built with ❤️ using [web3.py]
 - Inspired by the MCP protocol
 - Our amazing community of contributors and users
