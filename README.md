@@ -107,4 +107,4 @@ Join our community to get help and discuss MCP server development:
 
 ---
 
-Made with ❤️ by [Your Name/Organization]
+Made with ❤️ by [Your Muhammad Mazhar Saeed aka Professor]
