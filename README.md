@@ -39,11 +39,14 @@ A cutting-edge Model Context Protocol (MCP) server infrastructure designed to po
 git clone https://github.com/0x-Professor/mcp-servers.git
 cd mcp-servers
 
+# Set up environment
+uv venv
 # Install dependencies
 pip install -r requirements.txt
+or
+uv add -r requirements.txt
 
-# Set up environment variables
-cp .env.example .env
+# Set up environment variable
 # Edit .env with your configuration
 
 # Start the MCP server
