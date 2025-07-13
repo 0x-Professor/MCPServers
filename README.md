@@ -50,7 +50,7 @@ uv add -r requirements.txt
 # Edit .env with your configuration
 
 # Start the MCP server
-python -m mcp_servers.main
+uv run mcp dev SeverfileName.extension
 ```
 
 ## 🏗️ Architecture
