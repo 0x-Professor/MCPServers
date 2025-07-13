@@ -1,0 +1,3 @@
+./Blockchain/server/.env
+# Ignore environment variable files
+./Blockchain/server/.env.local

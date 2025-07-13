@@ -1,0 +1,6 @@
+fastmcp
+python-dotenv
+eth-keys
+eth-account
+httpx
+web3
