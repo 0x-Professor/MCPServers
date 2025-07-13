@@ -36,7 +36,7 @@ A cutting-edge Model Context Protocol (MCP) server infrastructure designed to po
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-servers.git
+git clone https://github.com/0x-Professor/mcp-servers.git
 cd mcp-servers
 
 # Install dependencies
@@ -69,36 +69,9 @@ graph TD
 
 ## 📚 Documentation
 
-For detailed documentation, please visit our [Documentation Portal](https://mcp-servers.readthedocs.io/).
+For detailed documentation, please visit our [Documentation Portal](https://mcp-servers.readthedocs.io/). Currently not available
 
-## 🔧 Configuration
 
-Edit the `config.yaml` file to customize your MCP server settings:
-
-```yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-  log_level: INFO
-
-blockchain:
-  networks:
-    - name: ethereum
-      rpc_url: https://mainnet.infura.io/v3/YOUR-PROJECT-ID
-    - name: solana
-      rpc_url: https://api.mainnet-beta.solana.com
-
-ai:
-  model_path: ./models/default
-  enable_automation: true
-  max_concurrent_tasks: 10
-
-security:
-  enable_2fa: true
-  rate_limit: 1000
-  allowed_origins:
-    - https://yourdomain.com
-```
 
 ## 🤝 Contributing
 
@@ -112,9 +85,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Join our community to get help and discuss MCP server development:
 
-- [Discord](https://discord.gg/your-invite-link)
-- [Twitter](https://twitter.com/your-handle)
-- [GitHub Discussions](https://github.com/yourusername/mcp-servers/discussions)
+- [Discord](https://discord.gg/your-invite-link) Coming Soon
+- [Twitter](https://twitter.com/your-handle) Coming Soon
+- [GitHub Discussions](https://github.com/0x-Professor/mcp-servers/discussions)
 
 ## 🔍 Roadmap
 
