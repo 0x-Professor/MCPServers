@@ -253,83 +253,142 @@ def handle_contract_result(result_str: str):
 # Example usage (uncomment to use in script):
 # result_str = await fetch_contract_code(address, chain)
 # handle_contract_result(result_str)
+# Mapping from string keys to VulnerabilityType enum members
+# ------------------------ VULNERABILITY TYPE MAPPING ------------------------
+VULN_TYPE_MAP = {
+    "reentrancy": VulnerabilityType.REENTRANCY,
+    "integer_overflow": VulnerabilityType.INTEGER_OVERFLOW,
+    "access_control": VulnerabilityType.ACCESS_CONTROL,
+    "unchecked_external_call": VulnerabilityType.UNCHECKED_EXTERNAL_CALL,
+    "timestamp_dependence": VulnerabilityType.TIMESTAMP_DEPENDENCY,
+    "front_running": VulnerabilityType.FRONT_RUNNING,
+    "weak_randomness": VulnerabilityType.WEAK_RANDOMNESS,
+    # Add more as needed
+}
+
+# ------------------------ ENUM SERIALIZER ------------------------
+def serialize_for_json(obj):
+    if isinstance(obj, Enum):
+        return obj.value
+    elif isinstance(obj, dict):
+        return {k: serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_for_json(i) for i in obj]
+    else:
+        return obj
+
+# ------------------------ ANALYSIS TOOL ENTRY ------------------------
 @mcp.tool()
-async def analyze_contract_vulnerabilities(code: str, contract_name: str = "Unknown", analysis_depth: str = "standard") ->str:
-    """ Analyze smart contract code for security vulnerabilities."""
+async def analyze_contract_vulnerabilities(code: str, contract_name: str = "Unknown", analysis_depth: str = "standard") -> str:
     vulnerabilities = []
+
+    is_solidity_08_or_above = re.search(r"pragma\s+solidity\s+\^?0\.8", code)
+
     for vuln_type, patterns in auditor.vulnerability_patterns.items():
+        vt_enum = VULN_TYPE_MAP.get(vuln_type)
+        if not vt_enum:
+            continue
+
         for pattern_info in patterns:
             matches = re.finditer(pattern_info["pattern"], code, re.IGNORECASE)
             for match in matches:
                 line_number = code[:match.start()].count('\n') + 1
-                vulnerability = Vulnerability(
-                    type=VulnerabilityType(vuln_type),
-                    severity=Severity.HIGH if vuln_type in ["reentrancy", "integer_overflow"] else Severity.MEDIUM,
+
+                # ✅ False positive control for Solidity >= 0.8 integer overflow
+                if vuln_type == "integer_overflow" and is_solidity_08_or_above:
+                    surrounding_code = code[max(0, match.start() - 100): match.end() + 100]
+                    if "unchecked" not in surrounding_code:
+                        continue  # skip if not truly vulnerable
+
+                vulnerabilities.append(Vulnerability(
+                    type=vt_enum,
+                    severity=_get_severity(vuln_type),
                     title=f"{vuln_type.replace('_', ' ').title()} Vulnerability",
                     description=pattern_info["description"],
                     location=f"Line {line_number}",
-                    code_snippet=match.group(0),
-                    impact=f"Potential {vuln_type.replace('_', ' ')} vulnerability",
-                    recommendation=f"Review and fix {vuln_type.replace('_', ' ')} issue"
-                    
-                )
-                vulnerabilities.append(vulnerability)
+                    code_snippet=match.group(0).strip(),
+                    impact=_get_impact_message(vuln_type),
+                    remediation=_get_remediation_message(vuln_type)
+                ))
+
     if analysis_depth == "deep":
-       vulnerabilities.extend(await _analyze_complex_patterns(code))
-       
+        vulnerabilities += await _analyze_complex_patterns(code)
+
     result = {
         "contract_name": contract_name,
         "analysis_depth": analysis_depth,
         "vulnerabilities_found": len(vulnerabilities),
-        "vulnerabilities": [asdict(v) for v in vulnerabilities],
+        "vulnerabilities": [serialize_for_json(asdict(v)) for v in vulnerabilities],
         "risk_score": _calculate_risk_score(vulnerabilities),
         "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
+
     return json.dumps(result, indent=2)
 
+# ------------------------ DEEP PATTERN CHECKS ------------------------
 async def _analyze_complex_patterns(code: str) -> List[Vulnerability]:
-    """Analyze complex vulnerability patterns."""
     vulnerabilities = []
-    
-    if re.search(r"tx\.origin", code):
+
+    # 🟡 tx.origin based authorization (Front-running)
+    if re.search(r"\btx\.origin\b", code):
         vulnerabilities.append(Vulnerability(
             type=VulnerabilityType.FRONT_RUNNING,
             severity=Severity.HIGH,
-            title="tx.origin Usage",
-            description="Using tx.origin for authorization is vulnerable to front-running",
-            location="Multiple locations",
+            title="tx.origin Misuse",
+            description="Using tx.origin for access control can be exploited by phishing attacks.",
+            location="Multiple occurrences",
             code_snippet="tx.origin",
-            impact="Attackers can impersonate users",
-            recommendation="Use msg.sender instead of tx.origin"
+            impact="Attackers can trick users into executing malicious contracts.",
+            remediation="Use msg.sender instead of tx.origin for authentication."
         ))
-    
-    if re.search(r"block\.timestamp.*random|block\.difficulty.*random|blockhash.*random", code):
+
+    # 🟡 Weak randomness based on block parameters
+    if re.search(r"(block\.timestamp|block\.difficulty|blockhash).*random", code):
         vulnerabilities.append(Vulnerability(
             type=VulnerabilityType.WEAK_RANDOMNESS,
             severity=Severity.MEDIUM,
-            title="Weak Randomness",
-            description="Using block properties for randomness is predictable",
-            location="Random generation code",
-            code_snippet="block.timestamp/difficulty for randomness",
-            impact="Randomness can be predicted by miners",
-            recommendation="Use commit-reveal scheme or external oracles"
+            title="Weak Randomness Detected",
+            description="Block parameters are predictable and can be manipulated.",
+            location="Random number generation code",
+            code_snippet="block.timestamp/difficulty/hash used in randomness",
+            impact="Malicious actors may predict or influence outcomes.",
+            remediation="Use Chainlink VRF or commit-reveal schemes instead."
         ))
-    
+
     return vulnerabilities
 
-def _calculate_risk_score(vulnerabilities: List[Vulnerability]) -> int:
-    """Calculate overall risk score."""
-    score = 0
-    for vuln in vulnerabilities:
-        if vuln.severity == Severity.CRITICAL:
-            score += 10
-        elif vuln.severity == Severity.HIGH:
-            score += 7
-        elif vuln.severity == Severity.MEDIUM:
-            score += 4
-        elif vuln.severity == Severity.LOW:
-            score += 2
-        else:
-            score += 1
-    return min(score, 100)
+# ------------------------ SEVERITY WEIGHTING ------------------------
+def _get_severity(vuln_type: str) -> Severity:
+    critical = ["reentrancy"]
+    high = ["integer_overflow", "unchecked_external_call", "front_running"]
+    medium = ["timestamp_dependence", "weak_randomness", "access_control"]
 
+    if vuln_type in critical:
+        return Severity.CRITICAL
+    elif vuln_type in high:
+        return Severity.HIGH
+    elif vuln_type in medium:
+        return Severity.MEDIUM
+    else:
+        return Severity.LOW
+
+# ------------------------ IMPACT/REMEDIATION HELPERS ------------------------
+def _get_impact_message(vuln_type: str) -> str:
+    return f"Potential impact due to {vuln_type.replace('_', ' ')} vulnerability."
+
+def _get_remediation_message(vuln_type: str) -> str:
+    return f"Review contract logic and mitigate {vuln_type.replace('_', ' ')} issue."
+
+# ------------------------ RISK SCORE CALCULATOR ------------------------
+def _calculate_risk_score(vulnerabilities: List[Vulnerability]) -> int:
+    score = 0
+    for v in vulnerabilities:
+        if v.severity == Severity.CRITICAL:
+            score += 10
+        elif v.severity == Severity.HIGH:
+            score += 7
+        elif v.severity == Severity.MEDIUM:
+            score += 4
+        elif v.severity == Severity.LOW:
+            score += 2
+    return min(score, 100)
