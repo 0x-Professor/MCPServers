@@ -168,3 +168,39 @@ async def make_web3_request(chain: str, func, *args, **kwargs) -> Any:
         logger.error(f"Web3 request failed: {str(e)}")
         return None
 
+@mcp.tool()
+async def fetch_contract_code(address: str, chain: str = "ethereum") -> str:
+    """Fetch smart contract source code and byte code from the blockchain."""
+    if chain not in SUPPORTED_CHAINS:
+        return f"Unsupported chain: {chain}"
+    
+    try:
+        explorer_url = SUPPORTED_CHAINS[chain]["explorer"]
+        params = {
+            "module": "contract",
+            "action": "getsourcecode",
+            "address": address,
+            "apikey": ETHERSCAN_API_KEY
+        }
+        data = await make_api_requrst(explorer_url, params)
+        if data and data["status"] == "1" and data["result"]:
+            contract_info = data["result"][0]
+            w3 = Web3(HTTPProvider(SUPPORTED_CHAINS[chain]["rpc"]))
+            bytecode = await make_web3_request(chain, w3.eth.get_code, address)
+            result = {
+                "address": address,
+                "chain": chain,
+                "contract_name": contract_info.get("ContractName", "Unknown"),
+                "source_code": contract_info.get("SourceCode", ""),
+                "abi": contract_info.get("ABI", ""),
+                "compiler_version": contract_info.get("CompilerVersion", ""),
+                "optimization_used": contract_info.get("OptimizationUsed", ""),
+                "bytecode": bytecode.hex() if bytecode else "",
+                "verification_status": "verified" if contract_info.get("SourceCode") else "unverified"
+            }
+            return json.dumps(result, indent=2)
+        else:
+            return f"Error: Failed to fetch contract code: {data.get('message', 'Unknown error') if data else 'No response'}"
+    except Exception as e:
+        logger.error(f"Error fetching contract code: {str(e)}")
+        return f"Error: {str(e)}"
