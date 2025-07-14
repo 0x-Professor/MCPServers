@@ -3,6 +3,7 @@ import json
 import re
 import asyncio
 import hashlib
+import uuid
 import time
 import logging
 from dotenv import load_dotenv
@@ -944,3 +945,58 @@ def _generate_compliance_recommendations(results: Dict[str, Any]) -> List[str]:
                 suggestions = ", ".join(failed)
                 recommendations.append(f"Improve {label} compliance: {suggestions}")
     return recommendations
+
+@mcp.tool()
+async def generate_audit_report(contract_address: str, vulnerabilities: List[Dict], gas_analysis: Dict = {}, include_recommendations: bool = True) -> str:
+    """Generate comprehensive audit report."""
+    report = {
+        "audit_report": {
+            "contract_address": contract_address,
+            "audit_date": time.strftime("%Y-%m-%d"),
+            "auditor": "AI Smart Contract Auditor",
+            "executive_summary": {
+                "total_vulnerabilities": len(vulnerabilities),
+                "critical_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "critical"]),
+                "high_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "high"]),
+                "medium_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "medium"]),
+                "low_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "low"]),
+                "overall_risk_rating": _determine_risk_rating(vulnerabilities)
+            },
+            "detailed_findings": vulnerabilities,
+            "gas_analysis": gas_analysis,
+            "methodology": [
+                "Static code analysis",
+                "Pattern matching for known vulnerabilities",
+                "Best practices compliance check",
+                "Gas optimization analysis",
+                "Automated testing simulation"
+            ]
+        }
+    }
+    
+    if include_recommendations:
+        report["audit_report"]["recommendations"] = [
+            "Address all critical and high-severity vulnerabilities before deployment",
+            "Implement comprehensive unit tests",
+            "Consider formal verification for critical functions",
+            "Perform manual code review",
+            "Use established security libraries like OpenZeppelin",
+            "Implement proper access controls",
+            "Add circuit breakers for emergency situations",
+            "Monitor contract behavior post-deployment"
+        ]
+    
+    return json.dumps(report, indent=2)
+
+def _determine_risk_rating(vulnerabilities: List[Dict]) -> str:
+    """Determine overall risk rating."""
+    critical_count = len([v for v in vulnerabilities if v.get("severity") == "critical"])
+    high_count = len([v for v in vulnerabilities if v.get("severity") == "high"])
+    if critical_count > 0:
+        return "CRITICAL"
+    elif high_count > 3:
+        return "HIGH"
+    elif high_count > 0:
+        return "MEDIUM"
+    else:
+        return "LOW"
