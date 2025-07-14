@@ -86,5 +86,61 @@ class SmartContractAuditor:
     
     def _load_vulnerability_patterns(self) -> Dict[str, List[Dict]]:
         """Load vulnerability detection patterns ."""
-        
-    
+        return {
+            "reentrancy": [
+                {"pattern": r"\.call\s*\(\s*[^)]*\)\s*;\s*[^;]*balance\s*=", "description": "Potential reentrancy: external call before state change"},
+                {"pattern": r"\.transfer\s*\(\s*[^)]*\)\s*;\s*[^;]*balance\s*=", "description": "Potential reentrancy: transfer before state change"}
+            ],
+            "integer_overflow": [
+                {"pattern": r"(?<!SafeMath\.)\+\s*(?!\s*1\s*;)", "description": "Potential integer overflow: unchecked addition"},
+                {"pattern": r"(?<!SafeMath\.)\*\s*", "description": "Potential integer overflow: unchecked multiplication"}
+            ],
+            "access_control": [
+                {"pattern": r"function\s+\w+\s*\([^)]*\)\s*public\s*(?!view|pure)", "description": "Public function without access control"},
+                {"pattern": r"selfdestruct\s*\(", "description": "Selfdestruct function without proper access control"}
+            ],
+            "unchecked_external_call": [
+                {"pattern": r"\.call\s*\([^)]*\)\s*;(?!\s*require)", "description": "Unchecked external call"},
+                {"pattern": r"\.send\s*\([^)]*\)\s*;(?!\s*require)", "description": "Unchecked send call"}
+            ],
+            "timestamp_dependence": [
+                {"pattern": r"block\.timestamp", "description": "Block timestamp usage - potential manipulation"},
+                {"pattern": r"now\s*[<>=]", "description": "Block timestamp comparison - potential manipulation"}
+            ]
+        }
+    def _load_gas_patterns(self) -> Dict[str, List[Dict]]:
+        """Load gas optimization patterns."""
+        return {
+            "storage_optimization": [
+                {"pattern": r"uint256\s+public\s+\w+\s*=\s*0;", "description": "Unnecessary zero initialization"},
+                {"pattern": r"for\s*\([^;]*;\s*\w+\s*<\s*\w+\.length\s*;", "description": "Array length in loop condition"}
+            ],
+            "function_optimization": [
+                {"pattern": r"function\s+\w+\s*\([^)]*\)\s*public\s*view", "description": "Consider making function external if not called internally"}
+            ]
+        }
+    def _load_best_practices(self) -> Dict[str, List[str]]:
+        """Load best Practices Checklist"""
+        return {
+            "security": [
+                "Use OpenZeppelin's security contracts",
+                "Implement proper access control",
+                "Use SafeMath for arithmetic operations",
+                "Implement circuit breakers",
+                "Use pull payment pattern"
+            ],
+            "gas_optimization": [
+                "Use appropriate data types",
+                "Minimize storage operations",
+                "Use events for cheap storage",
+                "Optimize loops",
+                "Use libraries for common functions"
+            ],
+            "code_quality": [
+                "Follow naming conventions",
+                "Add comprehensive comments",
+                "Use NatSpec documentation",
+                "Implement proper error handling",
+                "Write comprehensive tests"
+            ]
+        }
