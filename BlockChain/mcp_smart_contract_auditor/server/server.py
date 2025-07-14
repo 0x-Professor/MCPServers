@@ -571,3 +571,134 @@ def _calculate_risk_score(vulnerabilities: List[Vulnerability]) -> int:
         sev = vuln.severity.value if isinstance(vuln.severity, Enum) else str(vuln.severity)
         score += severity_weights.get(sev.upper(), 1)
     return min(score, 100)
+
+@mcp.tool()
+async def suggest_fixes(vulnerability: Dict[str, Any], context: str = "", fix_type: str = "comprehensive") -> str:
+    """Suggest fixes for identified vulnerabilities."""
+    vuln_type = vulnerability.get("type", "")
+    fixes = {
+        "reentrancy": {
+            "quick": "Add ReentrancyGuard modifier from OpenZeppelin",
+            "comprehensive": """
+// Use OpenZeppelin's ReentrancyGuard
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
+contract MyContract is ReentrancyGuard {
+    function vulnerableFunction() external nonReentrant {
+        // Your code here
+        // External calls should be at the end
+    }
+}
+
+// Alternative: Manual reentrancy protection
+bool private locked;
+modifier noReentrancy() {
+    require(!locked, "Reentrant call");
+    locked = true;
+    _;
+    locked = false;
+}
+"""
+        },
+        "integer_overflow": {
+            "quick": "Use SafeMath library or Solidity 0.8+",
+            "comprehensive": """
+// For Solidity < 0.8.0
+import "@openzeppelin/contracts/math/SafeMath.sol";
+
+contract MyContract {
+    using SafeMath for uint256;
+    
+    function safeAdd(uint256 a, uint256 b) public pure returns (uint256) {
+        return a.add(b); // Will revert on overflow
+    }
+}
+
+// For Solidity >= 0.8.0 (built-in overflow protection)
+contract MyContract {
+    function safeAdd(uint256 a, uint256 b) public pure returns (uint256) {
+        return a + b; // Automatically reverts on overflow
+    }
+}
+"""
+        },
+        "access_control": {
+            "quick": "Add access control modifiers",
+            "comprehensive": """
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+
+contract MyContract is Ownable, AccessControl {
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    
+    constructor() {
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(ADMIN_ROLE, msg.sender);
+    }
+    
+    function adminFunction() external onlyRole(ADMIN_ROLE) {
+        // Admin only functionality
+    }
+    
+    function operatorFunction() external onlyRole(OPERATOR_ROLE) {
+        // Operator only functionality
+    }
+}
+"""
+        },
+        "unchecked_external_call": {
+            "quick": "Check return values of external calls",
+            "comprehensive": """
+// Bad: Unchecked external call
+// someContract.call(data);
+
+// Good: Check return value
+(bool success, bytes memory data) = someContract.call(callData);
+require(success, "External call failed");
+
+// Alternative: Use try-catch (Solidity 0.6+)
+try someContract.someFunction() {
+    // Success handling
+} catch Error(string memory reason) {
+    // Handle revert with reason
+} catch (bytes memory lowLevelData) {
+    // Handle low-level errors
+}
+"""
+        },
+        "timestamp_dependence": {
+            "quick": "Use block.number instead of block.timestamp for timing",
+            "comprehensive": """
+// Bad: Direct timestamp comparison
+// require(block.timestamp > deadline);
+
+// Good: Use time windows instead of exact timestamps
+uint256 constant TIME_WINDOW = 1 hours;
+require(block.timestamp >= startTime + TIME_WINDOW, "Too early");
+
+// Alternative: Use block numbers for more predictable timing
+uint256 constant BLOCKS_PER_HOUR = 240; // Approximate
+require(block.number >= startBlock + BLOCKS_PER_HOUR, "Too early");
+"""
+        }
+    }
+    
+    fix_suggestion = fixes.get(vuln_type, {}).get(fix_type, "No specific fix available")
+    result = {
+        "vulnerability_type": vuln_type,
+        "fix_type": fix_type,
+        "recommendation": fix_suggestion,
+        "additional_resources": [
+            "https://consensys.github.io/smart-contract-best-practices/",
+            "https://swcregistry.io/",
+            "https://docs.openzeppelin.com/contracts/security"
+        ],
+        "testing_recommendations": [
+            "Write comprehensive unit tests",
+            "Perform integration testing",
+            "Use fuzzing tools like Echidna",
+            "Consider formal verification"
+        ]
+    }
+    return json.dumps(result, indent=2)
