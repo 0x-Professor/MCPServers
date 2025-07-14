@@ -702,3 +702,59 @@ require(block.number >= startBlock + BLOCKS_PER_HOUR, "Too early");
         ]
     }
     return json.dumps(result, indent=2)
+
+@mcp.tool()
+async def analyze_gas_efficiency(code: str, function_name: str ="") ->str:
+    """Analyze contract for gas efficiency and optimization opportunities."""
+    gas_issues = []
+    for issue_type, patterns in auditor.gas_patterns.items():
+        for pattern_info in patterns:
+            matches = re.finditer(pattern_info["pattern"], code, re.IGNORECASE)
+            for match in matches:
+                line_number = code[:match.start()].count('\n') + 1
+                gas_issues.append({
+                    "type": issue_type,
+                    "description": pattern_info["description"],
+                    "location": f"Line {line_number}",
+                    "code_snippet": match.group(0),
+                    "potential_savings": "Medium"
+                })
+    if "uint256" in code and "uint8" not in code:
+        gas_issues.append({
+            "type": "data_type_optimization",
+            "description": "Consider using smaller integer types where possible",
+            "location": "Throughout contract",
+            "code_snippet": "uint256 declarations",
+            "potential_savings": "Low"
+        })
+    if code.count("emit") > 5:
+        gas_issues.append({
+            "type": "event_optimization",
+            "description": "Consider consolidating events to reduce gas costs",
+            "location": "Multiple locations",
+            "code_snippet": "Multiple emit statements",
+            "potential_savings": "Medium"
+        })
+    result = {
+        "function_analyzed": function_name or "Entire contract",
+        "gas_optimization_opportunities": len(gas_issues),
+        "issues": gas_issues,
+        "estimated_gas_savings": _calculate_gas_savings(gas_issues),
+        "recommendations": [
+            "Use appropriate data types",
+            "Minimize storage operations",
+            "Use events for cheap storage",
+            "Optimize loops and conditionals",
+            "Consider assembly for gas-critical functions"
+        ]
+    }
+    return json.dumps(result, indent=2)
+
+def _calculate_gas_savings(issues: List[Dict]) -> str:
+    """Calculate estimated gas savings."""
+    high_impact = sum(1 for issue in issues if issue["potential_savings"] == "High")
+    medium_impact = sum(1 for issue in issues if issue["potential_savings"] == "Medium")
+    low_impact = sum(1 for issue in issues if issue["potential_savings"] == "Low")
+    estimated_savings = high_impact * 5000 + medium_impact * 2000 + low_impact * 500
+    return f"Approximately {estimated_savings} gas units"
+
