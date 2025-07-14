@@ -14,8 +14,8 @@ import httpx
 from web3 import Web3, HTTPProvider
 
 load_dotenv()
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "YOUR_ETHERSCAN_API_KEY")
-INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "YOUR_INFURA_PROJECT_ID")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ")
+INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "7464fe4568974a00b5cf20e94ebc4833")
 SUPPORTED_CHAINS = {
     "ethereum": {"rpc": f"https://mainnet.infura.io/v3/{INFURA_PROJECT_ID}", "explorer": "https://api.etherscan.io/api"},
     "polygon": {"rpc": "https://polygon-rpc.com", "explorer": "https://api.polygonscan.com/api"},
@@ -145,7 +145,7 @@ class SmartContractAuditor:
             ]
         }
 auditor = SmartContractAuditor()
-async def make_api_requrst(url: str, params: Dict = None) ->Any:
+async def make_api_request(url: str, params: Dict = None) ->Any:
     """Make an API request and return the JSON response."""
     async with httpx.AsyncClient() as client:
        try:
@@ -162,7 +162,12 @@ async def make_web3_request(chain: str, func, *args, **kwargs) -> Any:
         return None
     w3 = Web3(HTTPProvider(SUPPORTED_CHAINS[chain]["rpc"]))
     try:
-        result = await func(*args, **kwargs) if func.__name__.startswith("async") else func(*args, **kwargs)
+        # Check if the function is a coroutine function
+        import inspect
+        if inspect.iscoroutinefunction(func):
+            result = await func(*args, **kwargs)
+        else:
+            result = func(*args, **kwargs)
         return result
     except Exception as e:
         logger.error(f"Web3 request failed: {str(e)}")
@@ -173,7 +178,6 @@ async def fetch_contract_code(address: str, chain: str = "ethereum") -> str:
     """Fetch smart contract source code and byte code from the blockchain."""
     if chain not in SUPPORTED_CHAINS:
         return f"Unsupported chain: {chain}"
-    
     try:
         explorer_url = SUPPORTED_CHAINS[chain]["explorer"]
         params = {
@@ -182,11 +186,16 @@ async def fetch_contract_code(address: str, chain: str = "ethereum") -> str:
             "address": address,
             "apikey": ETHERSCAN_API_KEY
         }
-        data = await make_api_requrst(explorer_url, params)
-        if data and data["status"] == "1" and data["result"]:
+        logger.info(f"Etherscan request URL: {explorer_url}")
+        logger.info(f"Etherscan params: {params}")
+        logger.info(f"Etherscan API key (first 6 chars): {ETHERSCAN_API_KEY[:6]}")
+        data = await make_api_request(explorer_url, params)
+        logger.info(f"Etherscan raw response: {data}")
+        if data and data.get("status") == "1" and data.get("result"):
             contract_info = data["result"][0]
             w3 = Web3(HTTPProvider(SUPPORTED_CHAINS[chain]["rpc"]))
             bytecode = await make_web3_request(chain, w3.eth.get_code, address)
+            logger.info(f"Bytecode type: {type(bytecode)}, value: {bytecode}")
             result = {
                 "address": address,
                 "chain": chain,
@@ -200,7 +209,9 @@ async def fetch_contract_code(address: str, chain: str = "ethereum") -> str:
             }
             return json.dumps(result, indent=2)
         else:
-            return f"Error: Failed to fetch contract code: {data.get('message', 'Unknown error') if data else 'No response'}"
+            logger.error(f"Etherscan API error. Full response: {data}")
+            logger.error(f"Error: Failed to fetch contract code: {data.get('message', 'Unknown error') if data else 'No response'}")
+            return f"Error: Failed to fetch contract code: {data.get('message', 'Unknown error') if data else 'No response'}\nRaw response: {data}"
     except Exception as e:
         logger.error(f"Error fetching contract code: {str(e)}")
         return f"Error: {str(e)}"
