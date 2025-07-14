@@ -12,6 +12,12 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import httpx
 from web3 import Web3, HTTPProvider
+# Constants
+HIGH_IMPACT_SAVINGS = 5000
+MEDIUM_IMPACT_SAVINGS = 2000
+LOW_IMPACT_SAVINGS = 500
+MAX_EVENT_THRESHOLD = 5
+
 
 load_dotenv()
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ") # Default key for testing purposes
@@ -704,30 +710,53 @@ require(block.number >= startBlock + BLOCKS_PER_HOUR, "Too early");
     return json.dumps(result, indent=2)
 
 @mcp.tool()
-async def analyze_gas_efficiency(code: str, function_name: str ="") ->str:
-    """Analyze contract for gas efficiency and optimization opportunities."""
-    gas_issues = []
+async def analyze_gas_efficiency(code: str, function_name: str = "") -> str:
+    """
+    Analyze a smart contract for gas inefficiencies and optimization suggestions.
+
+    Args:
+        code (str): The Solidity source code of the contract.
+        function_name (str, optional): Specific function name to narrow the analysis.
+
+    Returns:
+        str: JSON-formatted result with issues, locations, and recommendations.
+    """
+    gas_issues: List[Dict[str, Any]] = []
+
+    # Pattern Matching
     for issue_type, patterns in auditor.gas_patterns.items():
         for pattern_info in patterns:
-            matches = re.finditer(pattern_info["pattern"], code, re.IGNORECASE)
-            for match in matches:
-                line_number = code[:match.start()].count('\n') + 1
+            try:
+                matches = re.finditer(pattern_info["pattern"], code, re.IGNORECASE)
+                for match in matches:
+                    line_number = code[:match.start()].count('\n') + 1
+                    gas_issues.append({
+                        "type": issue_type,
+                        "description": pattern_info["description"],
+                        "location": f"Line {line_number}",
+                        "code_snippet": match.group(0).strip(),
+                        "potential_savings": "Medium"
+                    })
+            except re.error as e:
                 gas_issues.append({
-                    "type": issue_type,
-                    "description": pattern_info["description"],
-                    "location": f"Line {line_number}",
-                    "code_snippet": match.group(0),
-                    "potential_savings": "Medium"
+                    "type": "pattern_error",
+                    "description": f"Regex error for pattern '{pattern_info['pattern']}': {str(e)}",
+                    "location": "N/A",
+                    "code_snippet": "",
+                    "potential_savings": "Low"
                 })
-    if "uint256" in code and "uint8" not in code:
+
+    # Additional Heuristics
+    if "uint256" in code and not re.search(r"\buint(8|16|32|64|128)\b", code):
         gas_issues.append({
             "type": "data_type_optimization",
-            "description": "Consider using smaller integer types where possible",
+            "description": "Consider using smaller integer types (e.g., uint8, uint16) where possible",
             "location": "Throughout contract",
             "code_snippet": "uint256 declarations",
             "potential_savings": "Low"
         })
-    if code.count("emit") > 5:
+
+    if code.count("emit") > MAX_EVENT_THRESHOLD:
         gas_issues.append({
             "type": "event_optimization",
             "description": "Consider consolidating events to reduce gas costs",
@@ -735,26 +764,41 @@ async def analyze_gas_efficiency(code: str, function_name: str ="") ->str:
             "code_snippet": "Multiple emit statements",
             "potential_savings": "Medium"
         })
-    result = {
+
+    # Assemble results
+    result: Dict[str, Any] = {
         "function_analyzed": function_name or "Entire contract",
         "gas_optimization_opportunities": len(gas_issues),
         "issues": gas_issues,
         "estimated_gas_savings": _calculate_gas_savings(gas_issues),
         "recommendations": [
-            "Use appropriate data types",
-            "Minimize storage operations",
-            "Use events for cheap storage",
-            "Optimize loops and conditionals",
-            "Consider assembly for gas-critical functions"
+            "Use appropriate data types (e.g., uint8 instead of uint256 when range allows)",
+            "Minimize redundant storage operations (SSTORE)",
+            "Use '++i' instead of 'i++' in loops for micro-savings",
+            "Avoid default visibility; declare visibility explicitly",
+            "Optimize event logging and loop conditions",
+            "Consider inline assembly for performance-critical paths (with care)",
+            "Leverage constant/immutable variables when possible"
         ]
     }
+
     return json.dumps(result, indent=2)
 
-def _calculate_gas_savings(issues: List[Dict]) -> str:
-    """Calculate estimated gas savings."""
-    high_impact = sum(1 for issue in issues if issue["potential_savings"] == "High")
-    medium_impact = sum(1 for issue in issues if issue["potential_savings"] == "Medium")
-    low_impact = sum(1 for issue in issues if issue["potential_savings"] == "Low")
-    estimated_savings = high_impact * 5000 + medium_impact * 2000 + low_impact * 500
-    return f"Approximately {estimated_savings} gas units"
+
+def _calculate_gas_savings(issues: List[Dict[str, Any]]) -> str:
+    """
+    Estimate gas savings based on severity of optimization issues.
+
+    Args:
+        issues (List[Dict[str, Any]]): List of identified gas-related issues.
+
+    Returns:
+        str: Approximate gas saved.
+    """
+    high = sum(1 for i in issues if i["potential_savings"] == "High")
+    med = sum(1 for i in issues if i["potential_savings"] == "Medium")
+    low = sum(1 for i in issues if i["potential_savings"] == "Low")
+
+    estimated = (high * HIGH_IMPACT_SAVINGS) + (med * MEDIUM_IMPACT_SAVINGS) + (low * LOW_IMPACT_SAVINGS)
+    return f"Approximately {estimated} gas units"
 
