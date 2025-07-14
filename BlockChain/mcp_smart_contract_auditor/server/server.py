@@ -78,11 +78,30 @@ class AuditReport:
     summary: Dict[str, Any] = None
     recommendations: List[str] = None
 
+VULN_TYPE_MAP = {
+    "reentrancy": VulnerabilityType.REENTRANCY,
+    "integer_overflow": VulnerabilityType.INTEGER_OVERFLOW,
+    "access_control": VulnerabilityType.ACCESS_CONTROL,
+    "unchecked_external_call": VulnerabilityType.UNCHECKED_EXTERNAL_CALL,
+    "timestamp_dependency": VulnerabilityType.TIMESTAMP_DEPENDENCY,
+    "front_running": VulnerabilityType.FRONT_RUNNING,
+    "weak_randomness": VulnerabilityType.WEAK_RANDOMNESS,
+    "delegatecall": VulnerabilityType.DELEGATECALL,
+    "uninitialized_storage": VulnerabilityType.UNINITIALIZED_STORAGE,
+    "denial_of_service": VulnerabilityType.DENIAL_OF_SERVICE,
+    "flash_loan_attack": VulnerabilityType.FLASH_LOAN_ATTACK,
+    "sandwich_attack": VulnerabilityType.SANDWICH_ATTACK,
+    "mev_vulnerability": VulnerabilityType.MEV_VULNERABILITY,
+    "governance_attack": VulnerabilityType.GOVERNANCE_ATTACK,
+    "oracle_manipulation": VulnerabilityType.ORACLE_MANIPULATION
+}
+
 class SmartContractAuditor:
     def __init__(self):
         self.vulnerability_patterns = self._load_vulnerability_patterns()
         self.gas_patterns = self._load_gas_patterns()
         self.best_practices = self._load_best_practices()
+        self.compiled_patterns = self._compile_patterns(self.vulnerability_patterns)
     
     def _load_vulnerability_patterns(self) -> Dict[str, List[Dict]]:
         """Load vulnerability detection patterns ."""
@@ -103,7 +122,7 @@ class SmartContractAuditor:
                 {"pattern": r"\.call\s*\([^)]*\)\s*;(?!\s*require)", "description": "Unchecked external call"},
                 {"pattern": r"\.send\s*\([^)]*\)\s*;(?!\s*require)", "description": "Unchecked send call"}
             ],
-            "timestamp_dependence": [
+            "timestamp_dependency": [
                 {"pattern": r"block\.timestamp", "description": "Block timestamp usage - potential manipulation"},
                 {"pattern": r"now\s*[<>=]", "description": "Block timestamp comparison - potential manipulation"}
             ]
@@ -144,6 +163,20 @@ class SmartContractAuditor:
                 "Write comprehensive tests"
             ]
         }
+    def _compile_patterns(self, patterns: Dict[str, List[Dict]]) -> Dict[str, List[tuple]]:
+        """
+        Compile all regex patterns for efficiency.
+        Args:
+            patterns (Dict[str, List[Dict]]): Vulnerability patterns.
+        Returns:
+            Dict[str, List[tuple]]: {vuln_type: [(compiled_pattern, description), ...]}
+        """
+        compiled = {}
+        for vuln_type, pattern_list in patterns.items():
+            compiled[vuln_type] = []
+            for pat in pattern_list:
+                compiled[vuln_type].append((re.compile(pat["pattern"], re.IGNORECASE), pat["description"]))
+        return compiled
 auditor = SmartContractAuditor()
 async def make_api_request(url: str, params: Dict = None) ->Any:
     """Make an API request and return the JSON response."""
@@ -250,24 +283,108 @@ def handle_contract_result(result_str: str):
         print("\nError parsing contract result:", str(e))
         print("Raw result:", result_str)
 
-# Example usage (uncomment to use in script):
-# result_str = await fetch_contract_code(address, chain)
-# handle_contract_result(result_str)
-# Mapping from string keys to VulnerabilityType enum members
-# ------------------------ VULNERABILITY TYPE MAPPING ------------------------
-VULN_TYPE_MAP = {
-    "reentrancy": VulnerabilityType.REENTRANCY,
-    "integer_overflow": VulnerabilityType.INTEGER_OVERFLOW,
-    "access_control": VulnerabilityType.ACCESS_CONTROL,
-    "unchecked_external_call": VulnerabilityType.UNCHECKED_EXTERNAL_CALL,
-    "timestamp_dependence": VulnerabilityType.TIMESTAMP_DEPENDENCY,
-    "front_running": VulnerabilityType.FRONT_RUNNING,
-    "weak_randomness": VulnerabilityType.WEAK_RANDOMNESS,
-    # Add more as needed
-}
-
-# ------------------------ ENUM SERIALIZER ------------------------
+@mcp.tool()
+async def analyze_contract_vulnerabilities(code: str, contract_name: str = "Unknown", analysis_depth: str = "standard") -> str:
+    """
+    Analyze smart contract code for security vulnerabilities.
+    
+    Args:
+        code (str): The Solidity contract source code.
+        contract_name (str): Name of the contract (default: "Unknown").
+        analysis_depth (str): Analysis depth ("standard" or "deep").
+    
+    Returns:
+        str: JSON-formatted analysis results.
+    """
+    vulnerabilities = []
+    
+    try:
+        # Check Solidity version
+        is_solidity_08_or_above = bool(re.search(r"pragma\s+solidity\s+\^?0\.8", code))
+        
+        # Track matches to avoid duplicates
+        seen_matches = set()
+        
+        for vuln_type, patterns in auditor.compiled_patterns.items():
+            vt_enum = VULN_TYPE_MAP.get(vuln_type)
+            if not vt_enum:
+                logger.warning(f"Unknown vulnerability type: {vuln_type}")
+                continue
+            
+            for pattern, description in patterns:
+                matches = pattern.finditer(code)
+                for match in matches:
+                    line_number = code[:match.start()].count('\n') + 1
+                    code_snippet = match.group(0).strip()
+                    match_key = f"{vuln_type}:{line_number}:{code_snippet}"
+                    
+                    # Skip duplicates
+                    if match_key in seen_matches:
+                        continue
+                    seen_matches.add(match_key)
+                    
+                    # False positive control for integer overflow
+                    if vuln_type == "integer_overflow" and is_solidity_08_or_above:
+                        surrounding_code = code[max(0, match.start() - 100): match.end() + 100]
+                        if "unchecked" not in surrounding_code:
+                            continue
+                    
+                    # False positive control for timestamp dependency
+                    if vuln_type == "timestamp_dependency":
+                        surrounding_code = code[max(0, match.start() - 200): match.end() + 200]
+                        # Skip if timestamp is used only for logging (events or storage)
+                        if re.search(r"event\s+\w+\s*\([^)]*block\.timestamp[^)]*\)|memos?\[\w*\]\.timestamp\s*=", surrounding_code):
+                            continue
+                    
+                    # False positive control for access control
+                    if vuln_type == "access_control":
+                        function_context = _get_function_context(code, match.start())
+                        if "onlyOwner" in function_context or "nonReentrant" in function_context:
+                            continue
+                    
+                    vulnerabilities.append(Vulnerability(
+                        type=vt_enum,
+                        severity=_get_severity(vuln_type, code, match.start()),
+                        title=f"{vuln_type.replace('_', ' ').title()} Vulnerability",
+                        description=description,
+                        location=f"Line {line_number}",
+                        code_snippet=code_snippet,
+                        impact=_get_impact_message(vuln_type),
+                        remediation=_get_remediation_message(vuln_type),
+                        cwe_id=_get_cwe_id(vuln_type),
+                        swc_id=_get_swc_id(vuln_type),
+                        references=_get_references(vuln_type)
+                    ))
+        
+        if analysis_depth == "deep":
+            deep_vulns = await _analyze_complex_patterns(code)
+            for vuln in deep_vulns:
+                match_key = f"{vuln.type.value}:{vuln.location}:{vuln.code_snippet}"
+                if match_key not in seen_matches:
+                    vulnerabilities.append(vuln)
+                    seen_matches.add(match_key)
+        
+        result = {
+            "contract_name": contract_name,
+            "analysis_depth": analysis_depth,
+            "vulnerabilities_found": len(vulnerabilities),
+            "vulnerabilities": [serialize_for_json(asdict(v)) for v in vulnerabilities],
+            "risk_score": _calculate_risk_score(vulnerabilities),
+            "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "solidity_version_detected": "0.8.0 or above" if is_solidity_08_or_above else "Below 0.8.0"
+        }
+        logger.info(f"Analyzed contract {contract_name}: {len(vulnerabilities)} vulnerabilities found")
+        return json.dumps(result, indent=2)
+    
+    except Exception as e:
+        logger.error(f"Error analyzing contract {contract_name}: {str(e)}")
+        return json.dumps({
+            "error": f"Analysis failed: {str(e)}",
+            "contract_name": contract_name,
+            "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }, indent=2)
 def serialize_for_json(obj):
+    """Serialize Enum and complex objects for JSON output."""
     if isinstance(obj, Enum):
         return obj.value
     elif isinstance(obj, dict):
@@ -277,59 +394,21 @@ def serialize_for_json(obj):
     else:
         return obj
 
-# ------------------------ ANALYSIS TOOL ENTRY ------------------------
-@mcp.tool()
-async def analyze_contract_vulnerabilities(code: str, contract_name: str = "Unknown", analysis_depth: str = "standard") -> str:
-    vulnerabilities = []
+def _get_function_context(code: str, match_start: int) -> str:
+    """Extract the function context for a given match position."""
+    lines = code[:match_start].split('\n')
+    line_number = len(lines)
+    # Look backward to find function declaration
+    for i in range(line_number - 1, -1, -1):
+        if re.match(r"function\s+\w+\s*\([^)]*\)\s*(public|external|internal|private)", lines[i]):
+            return lines[i]
+    return ""
 
-    is_solidity_08_or_above = re.search(r"pragma\s+solidity\s+\^?0\.8", code)
-
-    for vuln_type, patterns in auditor.vulnerability_patterns.items():
-        vt_enum = VULN_TYPE_MAP.get(vuln_type)
-        if not vt_enum:
-            continue
-
-        for pattern_info in patterns:
-            matches = re.finditer(pattern_info["pattern"], code, re.IGNORECASE)
-            for match in matches:
-                line_number = code[:match.start()].count('\n') + 1
-
-                # ✅ False positive control for Solidity >= 0.8 integer overflow
-                if vuln_type == "integer_overflow" and is_solidity_08_or_above:
-                    surrounding_code = code[max(0, match.start() - 100): match.end() + 100]
-                    if "unchecked" not in surrounding_code:
-                        continue  # skip if not truly vulnerable
-
-                vulnerabilities.append(Vulnerability(
-                    type=vt_enum,
-                    severity=_get_severity(vuln_type),
-                    title=f"{vuln_type.replace('_', ' ').title()} Vulnerability",
-                    description=pattern_info["description"],
-                    location=f"Line {line_number}",
-                    code_snippet=match.group(0).strip(),
-                    impact=_get_impact_message(vuln_type),
-                    remediation=_get_remediation_message(vuln_type)
-                ))
-
-    if analysis_depth == "deep":
-        vulnerabilities += await _analyze_complex_patterns(code)
-
-    result = {
-        "contract_name": contract_name,
-        "analysis_depth": analysis_depth,
-        "vulnerabilities_found": len(vulnerabilities),
-        "vulnerabilities": [serialize_for_json(asdict(v)) for v in vulnerabilities],
-        "risk_score": _calculate_risk_score(vulnerabilities),
-        "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    return json.dumps(result, indent=2)
-
-# ------------------------ DEEP PATTERN CHECKS ------------------------
 async def _analyze_complex_patterns(code: str) -> List[Vulnerability]:
+    """Analyze complex vulnerability patterns."""
     vulnerabilities = []
-
-    # 🟡 tx.origin based authorization (Front-running)
+    
+    # tx.origin misuse
     if re.search(r"\btx\.origin\b", code):
         vulnerabilities.append(Vulnerability(
             type=VulnerabilityType.FRONT_RUNNING,
@@ -339,11 +418,14 @@ async def _analyze_complex_patterns(code: str) -> List[Vulnerability]:
             location="Multiple occurrences",
             code_snippet="tx.origin",
             impact="Attackers can trick users into executing malicious contracts.",
-            remediation="Use msg.sender instead of tx.origin for authentication."
+            remediation="Use msg.sender instead of tx.origin for authentication.",
+            cwe_id="CWE-284",
+            swc_id="SWC-115",
+            references=["https://swcregistry.io/docs/SWC-115"]
         ))
-
-    # 🟡 Weak randomness based on block parameters
-    if re.search(r"(block\.timestamp|block\.difficulty|blockhash).*random", code):
+    
+    # Weak randomness
+    if re.search(r"(block\.timestamp|block\.difficulty|blockhash)\s*.*\brandom\b", code, re.IGNORECASE):
         vulnerabilities.append(Vulnerability(
             type=VulnerabilityType.WEAK_RANDOMNESS,
             severity=Severity.MEDIUM,
@@ -352,43 +434,140 @@ async def _analyze_complex_patterns(code: str) -> List[Vulnerability]:
             location="Random number generation code",
             code_snippet="block.timestamp/difficulty/hash used in randomness",
             impact="Malicious actors may predict or influence outcomes.",
-            remediation="Use Chainlink VRF or commit-reveal schemes instead."
+            remediation="Use Chainlink VRF or commit-reveal schemes instead.",
+            cwe_id="CWE-338",
+            swc_id="SWC-120",
+            references=["https://swcregistry.io/docs/SWC-120"]
         ))
-
+    
+    # Unchecked delegatecall
+    if re.search(r"\.delegatecall\s*\(", code):
+        vulnerabilities.append(Vulnerability(
+            type=VulnerabilityType.DELEGATECALL,
+            severity=Severity.CRITICAL,
+            title="Unsecure Delegatecall",
+            description="Use of delegatecall can allow malicious code execution.",
+            location="Delegatecall usage",
+            code_snippet=".delegatecall",
+            impact="Attackers can execute arbitrary code in contract's context.",
+            remediation="Avoid delegatecall or use only with trusted contracts.",
+            cwe_id="CWE-610",
+            swc_id="SWC-112",
+            references=["https://swcregistry.io/docs/SWC-112"]
+        ))
+    
     return vulnerabilities
 
-# ------------------------ SEVERITY WEIGHTING ------------------------
-def _get_severity(vuln_type: str) -> Severity:
-    critical = ["reentrancy"]
+def _get_severity(vuln_type: str, code: str, match_start: int) -> Severity:
+    """Determine vulnerability severity with context."""
+    critical = ["reentrancy", "delegatecall"]
     high = ["integer_overflow", "unchecked_external_call", "front_running"]
-    medium = ["timestamp_dependence", "weak_randomness", "access_control"]
-
+    medium = ["weak_randomness", "access_control", "uninitialized_storage"]
+    low = ["timestamp_dependency"]
+    
     if vuln_type in critical:
         return Severity.CRITICAL
     elif vuln_type in high:
         return Severity.HIGH
     elif vuln_type in medium:
         return Severity.MEDIUM
+    elif vuln_type == "timestamp_dependency":
+        # Downgrade to LOW if used only for logging
+        surrounding_code = code[max(0, match_start - 200): match_start + 200]
+        if re.search(r"event\s+\w+\s*\([^)]*block\.timestamp[^)]*\)|memos?\[\w*\]\.timestamp\s*=", surrounding_code):
+            return Severity.LOW
+        return Severity.MEDIUM
     else:
         return Severity.LOW
 
-# ------------------------ IMPACT/REMEDIATION HELPERS ------------------------
 def _get_impact_message(vuln_type: str) -> str:
-    return f"Potential impact due to {vuln_type.replace('_', ' ')} vulnerability."
+    """Get impact message for vulnerability."""
+    impacts = {
+        "reentrancy": "Could allow attackers to drain contract funds through recursive calls.",
+        "integer_overflow": "Could cause incorrect calculations or unexpected behavior.",
+        "access_control": "Could allow unauthorized access to sensitive functions.",
+        "unchecked_external_call": "Could lead to failed transactions or loss of funds.",
+        "timestamp_dependency": "Could be manipulated by miners within a small window.",
+        "front_running": "Could allow attackers to manipulate transaction ordering.",
+        "weak_randomness": "Could allow prediction or manipulation of random outcomes.",
+        "delegatecall": "Could allow execution of malicious code in contract's context.",
+        "uninitialized_storage": "Could lead to data corruption or unexpected behavior."
+    }
+    return impacts.get(vuln_type, f"Potential impact due to {vuln_type.replace('_', ' ')} vulnerability.")
 
 def _get_remediation_message(vuln_type: str) -> str:
-    return f"Review contract logic and mitigate {vuln_type.replace('_', ' ')} issue."
+    """Get remediation message for vulnerability."""
+    remediations = {
+        "reentrancy": "Use OpenZeppelin's ReentrancyGuard or checks-effects-interactions pattern.",
+        "integer_overflow": "Remove unchecked blocks or use SafeMath for Solidity <0.8.0.",
+        "access_control": "Add appropriate access control modifiers like onlyOwner.",
+        "unchecked_external_call": "Check return values of external calls or use try-catch.",
+        "timestamp_dependency": "Use block.number or external oracles for critical timing logic.",
+        "front_running": "Use msg.sender instead of tx.origin for authentication.",
+        "weak_randomness": "Use Chainlink VRF or commit-reveal schemes for randomness.",
+        "delegatecall": "Avoid delegatecall or use only with trusted contracts.",
+        "uninitialized_storage": "Initialize all storage variables explicitly."
+    }
+    return remediations.get(vuln_type, f"Review contract logic and mitigate {vuln_type.replace('_', ' ')} issue.")
 
-# ------------------------ RISK SCORE CALCULATOR ------------------------
+def _get_cwe_id(vuln_type: str) -> Optional[str]:
+    """Get CWE ID for vulnerability."""
+    cwe_ids = {
+        "reentrancy": "CWE-841",
+        "integer_overflow": "CWE-190",
+        "access_control": "CWE-284",
+        "unchecked_external_call": "CWE-252",
+        "timestamp_dependency": "CWE-829",
+        "front_running": "CWE-284",
+        "weak_randomness": "CWE-338",
+        "delegatecall": "CWE-610",
+        "uninitialized_storage": "CWE-824"
+    }
+    return cwe_ids.get(vuln_type)
+
+def _get_swc_id(vuln_type: str) -> Optional[str]:
+    """Get SWC ID for vulnerability."""
+    swc_ids = {
+        "reentrancy": "SWC-107",
+        "integer_overflow": "SWC-101",
+        "access_control": "SWC-100",
+        "unchecked_external_call": "SWC-104",
+        "timestamp_dependency": "SWC-116",
+        "front_running": "SWC-115",
+        "weak_randomness": "SWC-120",
+        "delegatecall": "SWC-112",
+        "uninitialized_storage": "SWC-109"
+    }
+    return swc_ids.get(vuln_type)
+
+def _get_references(vuln_type: str) -> List[str]:
+    """Get references for vulnerability."""
+    swc_id = _get_swc_id(vuln_type)
+    base_refs = ["https://consensys.github.io/smart-contract-best-practices/"]
+    if swc_id:
+        base_refs.append(f"https://swcregistry.io/docs/{swc_id}")
+    return base_refs
+
 def _calculate_risk_score(vulnerabilities: List[Vulnerability]) -> int:
+    """
+    Calculate an overall risk score for a contract based on detected vulnerabilities.
+    The score is weighted by severity and capped at 100.
+
+    Args:
+        vulnerabilities (List[Vulnerability]): List of detected vulnerabilities.
+
+    Returns:
+        int: Risk score (0-100).
+    """
+    severity_weights = {
+        "CRITICAL": 10,
+        "HIGH": 7,
+        "MEDIUM": 4,
+        "LOW": 2,
+        "INFO": 1
+    }
     score = 0
-    for v in vulnerabilities:
-        if v.severity == Severity.CRITICAL:
-            score += 10
-        elif v.severity == Severity.HIGH:
-            score += 7
-        elif v.severity == Severity.MEDIUM:
-            score += 4
-        elif v.severity == Severity.LOW:
-            score += 2
+    for vuln in vulnerabilities:
+        sev = vuln.severity.value if isinstance(vuln.severity, Enum) else str(vuln.severity)
+        score += severity_weights.get(sev.upper(), 1)
     return min(score, 100)
