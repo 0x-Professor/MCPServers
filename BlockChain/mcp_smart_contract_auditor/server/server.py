@@ -215,3 +215,121 @@ async def fetch_contract_code(address: str, chain: str = "ethereum") -> str:
     except Exception as e:
         logger.error(f"Error fetching contract code: {str(e)}")
         return f"Error: {str(e)}"
+
+def handle_contract_result(result_str: str):
+    """
+    Parse and display the contract result in a user-friendly way.
+    Usage:
+        result_str = await fetch_contract_code(address, chain)
+        handle_contract_result(result_str)
+    """
+    import json
+    try:
+        # Parse the JSON string
+        result = json.loads(result_str)
+        # Check verification status
+        if result.get("verification_status") == "verified":
+            print("\n✅ Contract is verified!")
+            print("Contract Name:", result.get("contract_name"))
+            print("Chain:", result.get("chain"))
+            print("Address:", result.get("address"))
+            print("Compiler Version:", result.get("compiler_version"))
+            print("Optimization Used:", result.get("optimization_used"))
+            print("\nSource Code (first 20 lines):")
+            source_lines = result.get("source_code", "").splitlines()
+            for line in source_lines[:20]:
+                print(line)
+            if len(source_lines) > 20:
+                print("... (truncated)")
+            print("\nABI (first 200 chars):", result.get("abi", "")[:200], "...")
+            print("Bytecode (first 60 chars):", result.get("bytecode", "")[:60], "...")
+        else:
+            print("\n❌ Contract is not verified or could not fetch code.")
+            print("Details:", result)
+    except Exception as e:
+        print("\nError parsing contract result:", str(e))
+        print("Raw result:", result_str)
+
+# Example usage (uncomment to use in script):
+# result_str = await fetch_contract_code(address, chain)
+# handle_contract_result(result_str)
+@mcp.tool()
+async def analyze_contract_vulnerabilities(code: str, contract_name: str = "Unknown", analysis_depth: str = "standard") ->str:
+    """ Analyze smart contract code for security vulnerabilities."""
+    vulnerabilities = []
+    for vuln_type, patterns in auditor.vulnerability_patterns.items():
+        for pattern_info in patterns:
+            matches = re.finditer(pattern_info["pattern"], code, re.IGNORECASE)
+            for match in matches:
+                line_number = code[:match.start()].count('\n') + 1
+                vulnerability = Vulnerability(
+                    type=VulnerabilityType(vuln_type),
+                    severity=Severity.HIGH if vuln_type in ["reentrancy", "integer_overflow"] else Severity.MEDIUM,
+                    title=f"{vuln_type.replace('_', ' ').title()} Vulnerability",
+                    description=pattern_info["description"],
+                    location=f"Line {line_number}",
+                    code_snippet=match.group(0),
+                    impact=f"Potential {vuln_type.replace('_', ' ')} vulnerability",
+                    recommendation=f"Review and fix {vuln_type.replace('_', ' ')} issue"
+                    
+                )
+                vulnerabilities.append(vulnerability)
+    if analysis_depth == "deep":
+       vulnerabilities.extend(await _analyze_complex_patterns(code))
+       
+    result = {
+        "contract_name": contract_name,
+        "analysis_depth": analysis_depth,
+        "vulnerabilities_found": len(vulnerabilities),
+        "vulnerabilities": [asdict(v) for v in vulnerabilities],
+        "risk_score": _calculate_risk_score(vulnerabilities),
+        "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    return json.dumps(result, indent=2)
+
+async def _analyze_complex_patterns(code: str) -> List[Vulnerability]:
+    """Analyze complex vulnerability patterns."""
+    vulnerabilities = []
+    
+    if re.search(r"tx\.origin", code):
+        vulnerabilities.append(Vulnerability(
+            type=VulnerabilityType.FRONT_RUNNING,
+            severity=Severity.HIGH,
+            title="tx.origin Usage",
+            description="Using tx.origin for authorization is vulnerable to front-running",
+            location="Multiple locations",
+            code_snippet="tx.origin",
+            impact="Attackers can impersonate users",
+            recommendation="Use msg.sender instead of tx.origin"
+        ))
+    
+    if re.search(r"block\.timestamp.*random|block\.difficulty.*random|blockhash.*random", code):
+        vulnerabilities.append(Vulnerability(
+            type=VulnerabilityType.WEAK_RANDOMNESS,
+            severity=Severity.MEDIUM,
+            title="Weak Randomness",
+            description="Using block properties for randomness is predictable",
+            location="Random generation code",
+            code_snippet="block.timestamp/difficulty for randomness",
+            impact="Randomness can be predicted by miners",
+            recommendation="Use commit-reveal scheme or external oracles"
+        ))
+    
+    return vulnerabilities
+
+def _calculate_risk_score(vulnerabilities: List[Vulnerability]) -> int:
+    """Calculate overall risk score."""
+    score = 0
+    for vuln in vulnerabilities:
+        if vuln.severity == Severity.CRITICAL:
+            score += 10
+        elif vuln.severity == Severity.HIGH:
+            score += 7
+        elif vuln.severity == Severity.MEDIUM:
+            score += 4
+        elif vuln.severity == Severity.LOW:
+            score += 2
+        else:
+            score += 1
+    return min(score, 100)
+
