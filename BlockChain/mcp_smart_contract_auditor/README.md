@@ -74,13 +74,11 @@ This server exposes a rich suite of tools as API endpoints. Each tool is designe
     uv add -r requirements.txt
     uv run mcp dev server/server.py
    ```
-   - Visit [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive API documentation.
-
+   
 ---
 
 ## 📚 Usage
 
-- **API Endpoints**: All analysis tools are available as REST endpoints. See `/docs` for details.
 - **Analyze a Contract**: Submit Solidity code or a contract address to receive a detailed vulnerability and gas report.
 - **Simulate Attacks**: Test your contract against simulated attack scenarios.
 - **Compliance & Best Practices**: Check for ERC compliance, code quality, and regulatory alignment.
