@@ -947,56 +947,109 @@ def _generate_compliance_recommendations(results: Dict[str, Any]) -> List[str]:
     return recommendations
 
 @mcp.tool()
-async def generate_audit_report(contract_address: str, vulnerabilities: List[Dict], gas_analysis: Dict = {}, include_recommendations: bool = True) -> str:
-    """Generate comprehensive audit report."""
-    report = {
+async def generate_audit_report(
+    contract_address: str,
+    vulnerabilities: List[Dict[str, Any]],
+    gas_analysis: Dict[str, Any] = {},
+    include_recommendations: bool = True
+) -> str:
+    """
+    Generate a comprehensive smart contract audit report.
+
+    Args:
+        contract_address (str): Target smart contract address.
+        vulnerabilities (List[Dict[str, Any]]): List of vulnerability dicts with severity info.
+        gas_analysis (Dict[str, Any], optional): Gas efficiency findings.
+        include_recommendations (bool, optional): Whether to include actionable recommendations.
+
+    Returns:
+        str: JSON-formatted audit report.
+    """
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    risk_rating = _determine_risk_rating(vulnerabilities)
+    vuln_summary = _summarize_vulnerabilities(vulnerabilities)
+
+    report: Dict[str, Any] = {
         "audit_report": {
+            "report_id": str(uuid.uuid4()),
+            "tool_version": "1.0.0",
             "contract_address": contract_address,
-            "audit_date": time.strftime("%Y-%m-%d"),
-            "auditor": "AI Smart Contract Auditor",
+            "audit_date": timestamp,
+            "auditor": {
+                "name": "AI Smart Contract Auditor",
+                "engine": "GPT-4o",
+                "methodology": [
+                    "Static code analysis",
+                    "Pattern-based vulnerability scanning",
+                    "Best practice enforcement",
+                    "Gas usage profiling",
+                    "Automated test simulation"
+                ]
+            },
             "executive_summary": {
-                "total_vulnerabilities": len(vulnerabilities),
-                "critical_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "critical"]),
-                "high_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "high"]),
-                "medium_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "medium"]),
-                "low_vulnerabilities": len([v for v in vulnerabilities if v.get("severity") == "low"]),
-                "overall_risk_rating": _determine_risk_rating(vulnerabilities)
+                **vuln_summary,
+                "overall_risk_rating": risk_rating
             },
             "detailed_findings": vulnerabilities,
-            "gas_analysis": gas_analysis,
-            "methodology": [
-                "Static code analysis",
-                "Pattern matching for known vulnerabilities",
-                "Best practices compliance check",
-                "Gas optimization analysis",
-                "Automated testing simulation"
-            ]
+            "gas_analysis": gas_analysis
         }
     }
-    
+
     if include_recommendations:
-        report["audit_report"]["recommendations"] = [
-            "Address all critical and high-severity vulnerabilities before deployment",
-            "Implement comprehensive unit tests",
-            "Consider formal verification for critical functions",
-            "Perform manual code review",
-            "Use established security libraries like OpenZeppelin",
-            "Implement proper access controls",
-            "Add circuit breakers for emergency situations",
-            "Monitor contract behavior post-deployment"
-        ]
-    
+        report["audit_report"]["recommendations"] = _generate_recommendations(vulnerabilities)
+
     return json.dumps(report, indent=2)
 
-def _determine_risk_rating(vulnerabilities: List[Dict]) -> str:
-    """Determine overall risk rating."""
-    critical_count = len([v for v in vulnerabilities if v.get("severity") == "critical"])
-    high_count = len([v for v in vulnerabilities if v.get("severity") == "high"])
-    if critical_count > 0:
+
+def _summarize_vulnerabilities(vulnerabilities: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Summarize vulnerabilities by severity."""
+    severity_levels = ["critical", "high", "medium", "low", "informational"]
+    summary = {f"{level}_vulnerabilities": 0 for level in severity_levels}
+    for vuln in vulnerabilities:
+        severity = vuln.get("severity", "").lower()
+        if severity in summary:
+            summary[f"{severity}_vulnerabilities"] += 1
+    summary["total_vulnerabilities"] = sum(summary.values())
+    return summary
+
+
+def _determine_risk_rating(vulnerabilities: List[Dict[str, Any]]) -> str:
+    """Determine overall risk based on severity weights."""
+    score = 0
+    weights = {
+        "critical": 5,
+        "high": 3,
+        "medium": 2,
+        "low": 1,
+        "informational": 0
+    }
+    for vuln in vulnerabilities:
+        severity = vuln.get("severity", "").lower()
+        score += weights.get(severity, 0)
+
+    if score >= 10:
         return "CRITICAL"
-    elif high_count > 3:
+    elif score >= 6:
         return "HIGH"
-    elif high_count > 0:
+    elif score >= 3:
         return "MEDIUM"
     else:
         return "LOW"
+
+
+def _generate_recommendations(vulnerabilities: List[Dict[str, Any]]) -> List[str]:
+    """Generate actionable recommendations based on vulnerabilities."""
+    if not vulnerabilities:
+        return ["No vulnerabilities detected. Maintain regular audits and testing."]
+
+    recommendations = [
+        "Patch all critical and high-severity issues before deployment.",
+        "Add unit tests to cover vulnerable or unverified logic paths.",
+        "Consider formal verification for core logic functions.",
+        "Avoid custom security logic—use vetted libraries like OpenZeppelin.",
+        "Implement pause/freeze mechanisms for emergency mitigation.",
+        "Strengthen access control and privilege separation.",
+        "Conduct manual review for business logic consistency.",
+        "Use real-time monitoring tools after deployment (e.g., Forta)."
+    ]
+    return recommendations
