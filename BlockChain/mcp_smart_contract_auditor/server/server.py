@@ -802,3 +802,145 @@ def _calculate_gas_savings(issues: List[Dict[str, Any]]) -> str:
     estimated = (high * HIGH_IMPACT_SAVINGS) + (med * MEDIUM_IMPACT_SAVINGS) + (low * LOW_IMPACT_SAVINGS)
     return f"Approximately {estimated} gas units"
 
+@mcp.tool()
+async def check_compliance(code: str, standards: List[str] = [], jurisdiction: str = "general") -> str:
+    """
+    Check smart contract code against token standards (ERC-20/721/1155), general best practices,
+    and regulatory jurisdictions like EU (GDPR) and US (SEC).
+
+    Args:
+        code (str): Solidity source code
+        standards (List[str]): List of standards to validate against
+        jurisdiction (str): Regulatory jurisdiction ("general", "EU", "US")
+
+    Returns:
+        str: JSON-formatted result containing compliance status, recommendations, and score
+    """
+    compliance_results: Dict[str, Any] = {}
+
+    # Standards checks
+    if "ERC-20" in standards:
+        compliance_results["ERC-20"] = _check_erc20_compliance(code)
+    if "ERC-721" in standards:
+        compliance_results["ERC-721"] = _check_erc721_compliance(code)
+    if "ERC-1155" in standards:
+        compliance_results["ERC-1155"] = _check_erc1155_compliance(code)
+
+    # General best practices
+    general_compliance = {
+        "has_license": bool(re.search(r"SPDX-License-Identifier:\s*[A-Za-z\-]+", code)),
+        "has_pragma": "pragma solidity" in code,
+        "has_natspec": "///" in code or "/**" in code,
+        "follows_naming_conventions": _check_naming_conventions(code),
+        "has_error_handling": "require(" in code or "revert(" in code,
+        "has_events": "event " in code and "emit " in code
+    }
+    compliance_results["general"] = general_compliance
+
+    # Jurisdiction-specific compliance
+    if jurisdiction == "EU":
+        compliance_results["GDPR"] = _check_gdpr_compliance(code)
+    elif jurisdiction == "US":
+        compliance_results["SEC"] = _check_sec_compliance(code)
+
+    result: Dict[str, Any] = {
+        "standards_checked": standards,
+        "jurisdiction": jurisdiction,
+        "compliance_results": compliance_results,
+        "overall_compliance_score": _calculate_compliance_score(compliance_results),
+        "recommendations": _generate_compliance_recommendations(compliance_results)
+    }
+
+    return json.dumps(result, indent=2)
+
+
+# --- Standard Checks --- #
+
+def _check_erc20_compliance(code: str) -> Dict[str, bool]:
+    required_functions = [
+        "totalSupply", "balanceOf", "transfer", "transferFrom", "approve", "allowance"
+    ]
+    required_events = ["Transfer", "Approval"]
+    return _match_signatures(code, required_functions, required_events)
+
+
+def _check_erc721_compliance(code: str) -> Dict[str, bool]:
+    required_functions = [
+        "balanceOf", "ownerOf", "safeTransferFrom", "transferFrom",
+        "approve", "getApproved", "setApprovalForAll", "isApprovedForAll"
+    ]
+    required_events = ["Transfer", "Approval", "ApprovalForAll"]
+    return _match_signatures(code, required_functions, required_events)
+
+
+def _check_erc1155_compliance(code: str) -> Dict[str, bool]:
+    required_functions = [
+        "balanceOf", "balanceOfBatch", "safeTransferFrom",
+        "safeBatchTransferFrom", "setApprovalForAll", "isApprovedForAll"
+    ]
+    required_events = ["TransferSingle", "TransferBatch", "ApprovalForAll", "URI"]
+    return _match_signatures(code, required_functions, required_events)
+
+
+def _match_signatures(code: str, functions: List[str], events: List[str]) -> Dict[str, bool]:
+    """Helper to check presence of required functions and events."""
+    result = {}
+    for func in functions:
+        result[f"has_{func}"] = re.search(rf"function\s+{func}\s*\(", code) is not None
+    for evt in events:
+        result[f"has_{evt}_event"] = re.search(rf"event\s+{evt}\s*\(", code) is not None
+    return result
+
+
+# --- General Checks --- #
+
+def _check_naming_conventions(code: str) -> bool:
+    """Verify contract and function naming style."""
+    function_pattern = r"function\s+([a-z][a-zA-Z0-9]*)\s*\("
+    contract_pattern = r"contract\s+([A-Z][a-zA-Z0-9]*)\s*"
+    functions = re.findall(function_pattern, code)
+    contracts = re.findall(contract_pattern, code)
+    return bool(functions) and bool(contracts)
+
+
+# --- Jurisdictional Checks --- #
+
+def _check_gdpr_compliance(code: str) -> Dict[str, bool]:
+    return {
+        "has_data_deletion": "delete" in code.lower() or "remove" in code.lower(),
+        "has_access_control": "onlyOwner" in code or "AccessControl" in code,
+        "has_consent_mechanism": "consent" in code.lower() or "approve" in code.lower(),
+        "has_data_portability": "export" in code.lower() or "getData" in code.lower()
+    }
+
+
+def _check_sec_compliance(code: str) -> Dict[str, bool]:
+    return {
+        "has_transfer_restrictions": "transfer" in code and "require" in code,
+        "has_kyc_integration": "kyc" in code.lower() or "whitelist" in code.lower(),
+        "has_accredited_investor_check": "accredited" in code.lower() or "qualified" in code.lower(),
+        "has_lock_up_periods": "lockup" in code.lower() or "vesting" in code.lower()
+    }
+
+
+# --- Scoring & Feedback --- #
+
+def _calculate_compliance_score(results: Dict[str, Any]) -> int:
+    total = 0
+    passed = 0
+    for section in results.values():
+        if isinstance(section, dict):
+            total += len(section)
+            passed += sum(1 for status in section.values() if status is True)
+    return round((passed / total) * 100) if total else 0
+
+
+def _generate_compliance_recommendations(results: Dict[str, Any]) -> List[str]:
+    recommendations: List[str] = []
+    for label, checks in results.items():
+        if isinstance(checks, dict):
+            failed = [k for k, v in checks.items() if not v]
+            if failed:
+                suggestions = ", ".join(failed)
+                recommendations.append(f"Improve {label} compliance: {suggestions}")
+    return recommendations
