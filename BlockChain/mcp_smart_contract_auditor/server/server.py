@@ -144,3 +144,27 @@ class SmartContractAuditor:
                 "Write comprehensive tests"
             ]
         }
+auditor = SmartContractAuditor()
+async def make_api_requrst(url: str, params: Dict = None) ->Any:
+    """Make an API request and return the JSON response."""
+    async with httpx.AsyncClient() as client:
+       try:
+           response  = await client.get(url, params=params, timeout = 10.0)
+           response.raise_for_status()
+           return response.json()
+       except httpx.HTTPStatusError as e:
+           logger.error(f"HTTP error occurred: {e.response.status_code} - {e.response.text}")
+           return None
+    
+async def make_web3_request(chain: str, func, *args, **kwargs) -> Any:
+    """Make a Web3 request to the specified chain."""
+    if chain not in SUPPORTED_CHAINS:
+        return None
+    w3 = Web3(HTTPProvider(SUPPORTED_CHAINS[chain]["rpc"]))
+    try:
+        result = await func(*args, **kwargs) if func.__name__.startswith("async") else func(*args, **kwargs)
+        return result
+    except Exception as e:
+        logger.error(f"Web3 request failed: {str(e)}")
+        return None
+
