@@ -52,7 +52,7 @@ This server exposes a rich suite of tools as API endpoints. Each tool is designe
 
 1. **Clone the repository**
    ```sh
-   git clone <your-repo-url>
+   git clone (https://github.com/0x-Professor/MCPServers.git)
    cd mcp_smart_contract_auditor
    ```
 
