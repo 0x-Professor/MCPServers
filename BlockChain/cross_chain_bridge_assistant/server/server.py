@@ -162,8 +162,15 @@ class BridgeStatus(BaseModel):
    last_updated: str = Field(..., description="Timestamp of the last status update")
    liquidity: Optional[Dict[str, Dict[str, str]]] = Field(default=None, description="Current liquidity available in the bridge")
    
+class TokenInfo(BaseModel):
+    """Model for OAuth 2.1 token information."""
+    sub: str = Field(description="Subject identifier of the token")
+    scopes: List[str] = Field(description="List of scopes granted by the token")
+    expires_at: datetime = Field(description="Token expiration timestamp")
+
 class SimpleTokenVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> TokenInfo:
+        """Verify OAuth 2.1 token"""
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(
@@ -177,15 +184,10 @@ class SimpleTokenVerifier(TokenVerifier):
                             scopes=data.get("scope", "").split(),
                             expires_at=datetime.fromtimestamp(data.get("exp", 0))
                         )
-                    raise ValueError("Invalid token")
+                    raise ValueError("Invalid or inactive token")
             except Exception as e:
+                logger.error(f"Token verification failed: {str(e)}")
                 raise ValueError(f"Token verification failed: {str(e)}")
-
-@dataclass
-class TokenInfo(BaseModel):
-    sub: str = Field(description="Subject identifier of the token")
-    scopes: List[str] = Field(description="List of scopes granted by the token")
-    expires_at: datetime = Field(description="Token expiration timestamp")
 
 @dataclass
 class AppContext:
@@ -1598,6 +1600,7 @@ Optimize bridge route.
 3. Run the server: `mcp run cross_chain_bridge_assistant.py`
 """
 
+server = CrossChainBridgeServer().mcp
+
 if __name__ == "__main__":
-    server = CrossChainBridgeServer()
-    server.mcp.run(transport="streamable-http")
+    server.run(transport="streamable-http")
