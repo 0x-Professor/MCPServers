@@ -182,10 +182,10 @@ class SimpleTokenVerifier(TokenVerifier):
                 raise ValueError(f"Token verification failed: {str(e)}")
 
 @dataclass
-class TokenInfo:
-    sub: str
-    scopes: List[str]
-    expires_at: datetime
+class TokenInfo(BaseModel):
+    sub: str = Field(description="Subject identifier of the token")
+    scopes: List[str] = Field(description="List of scopes granted by the token")
+    expires_at: datetime = Field(description="Token expiration timestamp")
 
 @dataclass
 class AppContext:
