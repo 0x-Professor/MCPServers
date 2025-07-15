@@ -1157,3 +1157,442 @@ class CrossChainBridgeServer:
         return hmac.new(
             HMAC_SECRET.encode(), message.encode(), hashlib.sha256
         ).hexdigest()
+        
+    
+    async def _execute_bridge_contract(self, transaction: BridgeTransaction, 
+                                     private_key: str, fee_estimate: Dict[str, Any],
+                                     w3_connections: Dict[str, Web3]) -> Dict[str, Any]:
+        """Execute bridge contract"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                source_w3 = w3_connections.get(transaction.source_chain)
+                if not source_w3:
+                    return {"success": False, "error": "Web3 connection not available"}
+                
+                abi_cache = self.mcp.get_context().request_context.lifespan_context["abi_cache"]
+                bridge_config = BRIDGE_CONTRACTS[transaction.bridge_contract]
+                contract = source_w3.eth.contract(
+                    address=to_checksum_address(bridge_config[f"{transaction.source_chain}_address"]),
+                    abi=await self._get_contract_abi(transaction.bridge_contract, transaction.source_chain, abi_cache)
+                )
+                
+                amount_wei = Web3.to_wei(Decimal(transaction.amount), "ether") if transaction.asset.upper() == SUPPORTED_CHAINS[transaction.source_chain]["native_token"] else int(transaction.amount)
+                tx_data = contract.functions.depositFor(
+                    to_checksum_address(transaction.recipient),
+                    amount_wei
+                ).build_transaction({
+                    "from": to_checksum_address(transaction.sender),
+                    "value": amount_wei if transaction.asset.upper() == SUPPORTED_CHAINS[transaction.source_chain]["native_token"] else 0,
+                    "gas": int(fee_estimate["gas_estimates"]["source_gas_limit"]),
+                    "gasPrice": int(fee_estimate["gas_estimates"]["source_gas_price"]),
+                    "nonce": source_w3.eth.get_transaction_count(transaction.sender)
+                })
+                
+                signed_tx = source_w3.eth.account.sign_transaction(tx_data, private_key)
+                tx_hash = source_w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                receipt = source_w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+                
+                return {
+                    "success": receipt.status == 1,
+                    "transaction_hash": tx_hash.hex(),
+                    "block_number": receipt.blockNumber,
+                    "gas_used": str(receipt.gasUsed)
+                }
+            
+            except Exception as e:
+                logger.error(f"Error executing bridge contract: {e}")
+                return {"success": False, "error": str(e)}
+    
+    async def _monitor_transaction_completion(self, transaction: BridgeTransaction):
+        """Monitor transaction completion"""
+        ctx = self.mcp.get_context()
+        w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+        db_connection = ctx.request_context.lifespan_context["db_connection"]
+        try:
+            dest_w3 = w3_connections.get(transaction.destination_chain)
+            if not dest_w3:
+                return
+            
+            abi_cache = ctx.request_context.lifespan_context["abi_cache"]
+            bridge_config = BRIDGE_CONTRACTS[transaction.bridge_contract]
+            contract = dest_w3.eth.contract(
+                address=to_checksum_address(bridge_config[f"{transaction.destination_chain}_address"]),
+                abi=await self._get_contract_abi(transaction.bridge_contract, transaction.destination_chain, abi_cache)
+            )
+            
+            event_filter = contract.events.TransferCompleted.create_filter(fromBlock="latest")
+            start_time = time.time()
+            
+            while time.time() - start_time < 3600:
+                for event in event_filter.get_new_entries():
+                    if event["args"]["recipient"] == to_checksum_address(transaction.recipient):
+                        transaction.destination_tx_hash = event["transactionHash"].hex()
+                        transaction.status = TransactionStatus.CONFIRMED.value
+                        transaction.completed_at = datetime.now().isoformat()
+                        self._save_transaction(transaction, db_connection)
+                        return
+                await asyncio.sleep(10)
+            
+            transaction.status = TransactionStatus.FAILED.value
+            transaction.completed_at = datetime.now().isoformat()
+            self._save_transaction(transaction, db_connection)
+        
+        except Exception as e:
+            logger.error(f"Error monitoring transaction completion: {e}")
+            transaction.status = TransactionStatus.FAILED.value
+            transaction.completed_at = datetime.now().isoformat()
+            self._save_transaction(transaction, db_connection)
+    
+    async def _get_network_status(self) -> Dict[str, Any]:
+        """Get network status"""
+        ctx = self.mcp.get_context()
+        w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+        network_status = {}
+        async with aiohttp.ClientSession() as session:
+            for chain_name, chain_config in SUPPORTED_CHAINS.items():
+                w3 = w3_connections.get(chain_name)
+                if w3:
+                    try:
+                        latest_block = w3.eth.block_number
+                        gas_price = w3.eth.gas_price
+                        network_status[chain_name] = {
+                            "online": True,
+                            "latest_block": latest_block,
+                            "gas_price": str(Web3.from_wei(gas_price, "gwei")),
+                            "chain_id": chain_config["chain_id"],
+                            "last_updated": datetime.now().isoformat()
+                        }
+                    except Exception as e:
+                        network_status[chain_name] = {
+                            "online": False,
+                            "error": str(e),
+                            "last_updated": datetime.now().isoformat()
+                        }
+                else:
+                    network_status[chain_name] = {
+                        "online": False,
+                        "error": "Web3 connection not available",
+                        "last_updated": datetime.now().isoformat()
+                    }
+        return network_status
+    
+    async def _get_analytics_overview(self) -> Dict[str, Any]:
+        """Get analytics overview"""
+        ctx = self.mcp.get_context()
+        db_connection = ctx.request_context.lifespan_context["db_connection"]
+        cursor = db_connection.cursor()
+        cursor.execute("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as completed FROM transactions")
+        result = cursor.fetchone()
+        
+        return {
+            "total_transactions": result[0],
+            "completed_transactions": result[1],
+            "success_rate": result[1] / result[0] if result[0] > 0 else 0,
+            "supported_chains": len(SUPPORTED_CHAINS),
+            "supported_bridges": len(BRIDGE_CONTRACTS),
+            "last_updated": datetime.now().isoformat()
+        }
+    
+    def _calculate_volume_analytics(self, transactions: List[BridgeTransaction]) -> Dict[str, Any]:
+        """Calculate volume analytics"""
+        total_volume = sum(float(tx.amount) for tx in transactions)
+        volume_by_source = {}
+        volume_by_destination = {}
+        
+        for tx in transactions:
+            volume_by_source[tx.source_chain] = volume_by_source.get(tx.source_chain, 0) + float(tx.amount)
+            volume_by_destination[tx.destination_chain] = volume_by_destination.get(tx.destination_chain, 0) + float(tx.amount)
+        
+        return {
+            "total_volume": total_volume,
+            "transaction_count": len(transactions),
+            "average_transaction_size": total_volume / len(transactions) if transactions else 0,
+            "volume_by_source_chain": volume_by_source,
+            "volume_by_destination_chain": volume_by_destination
+        }
+    
+    def _calculate_transaction_analytics(self, transactions: List[BridgeTransaction]) -> Dict[str, Any]:
+        """Calculate transaction analytics"""
+        status_counts = {}
+        for tx in transactions:
+            status_counts[tx.status] = status_counts.get(tx.status, 0) + 1
+        
+        return {
+            "total_transactions": len(transactions),
+            "status_breakdown": status_counts,
+            "success_rate": status_counts.get(TransactionStatus.CONFIRMED.value, 0) / len(transactions) if transactions else 0
+        }
+    
+    def _calculate_fee_analytics(self, transactions: List[BridgeTransaction]) -> Dict[str, Any]:
+        """Calculate fee analytics"""
+        total_fees = 0
+        fee_breakdown = {"source_chain_fees": 0, "destination_chain_fees": 0, "bridge_fees": 0}
+        
+        for tx in transactions:
+            if tx.fees:
+                total_fees += float(tx.fees.total_fee)
+                fee_breakdown["source_chain_fees"] += float(tx.fees.source_chain_fee)
+                fee_breakdown["destination_chain_fees"] += float(tx.fees.destination_chain_fee)
+                fee_breakdown["bridge_fees"] += float(tx.fees.bridge_fee)
+        
+        return {
+            "total_fees_collected": total_fees,
+            "average_fee_per_transaction": total_fees / len(transactions) if transactions else 0,
+            "fee_breakdown": fee_breakdown
+        }
+    
+    def _calculate_success_rate_analytics(self, transactions: List[BridgeTransaction]) -> Dict[str, Any]:
+        """Calculate success rate analytics"""
+        total = len(transactions)
+        successful = sum(1 for tx in transactions if tx.status == TransactionStatus.CONFIRMED.value)
+        failed = sum(1 for tx in transactions if tx.status == TransactionStatus.FAILED.value)
+        pending = sum(1 for tx in transactions if tx.status == TransactionStatus.PENDING.value)
+        
+        return {
+            "total_transactions": total,
+            "successful_transactions": successful,
+            "failed_transactions": failed,
+            "pending_transactions": pending,
+            "success_rate": successful / total if total > 0 else 0,
+            "failure_rate": failed / total if total > 0 else 0
+        }
+    
+    async def _find_all_routes(self, source_chain: str, destination_chain: str,
+                             asset: str, amount: str) -> List[Dict[str, Any]]:
+        """Find all possible routes"""
+        async with aiohttp.ClientSession() as session:
+            routes = []
+            direct_bridge = self._find_bridge(source_chain, destination_chain)
+            if direct_bridge:
+                fee_estimate = await self._estimate_bridge_fees(source_chain, destination_chain, asset, amount)
+                if "error" not in fee_estimate:
+                    routes.append({
+                        "type": "direct",
+                        "path": [source_chain, destination_chain],
+                        "bridges": [direct_bridge],
+                        "total_cost": fee_estimate["fees"]["total_fee"],
+                        "estimated_time_seconds": self._parse_completion_time(fee_estimate["estimated_completion_time"]),
+                        "steps": 1
+                    })
+            
+            for intermediate_chain in SUPPORTED_CHAINS.keys():
+                if intermediate_chain not in [source_chain, destination_chain]:
+                    bridge1 = self._find_bridge(source_chain, intermediate_chain)
+                    bridge2 = self._find_bridge(intermediate_chain, destination_chain)
+                    
+                    if bridge1 and bridge2:
+                        fee1 = await self._estimate_bridge_fees(source_chain, intermediate_chain, asset, amount)
+                        fee2 = await self._estimate_bridge_fees(intermediate_chain, destination_chain, asset, amount)
+                        
+                        if "error" not in fee1 and "error" not in fee2:
+                            total_cost = float(fee1["fees"]["total_fee"]) + float(fee2["fees"]["total_fee"])
+                            total_time = (self._parse_completion_time(fee1["estimated_completion_time"]) + 
+                                        self._parse_completion_time(fee2["estimated_completion_time"]))
+                            
+                            routes.append({
+                                "type": "multi_hop",
+                                "path": [source_chain, intermediate_chain, destination_chain],
+                                "bridges": [bridge1, bridge2],
+                                "total_cost": str(total_cost),
+                                "estimated_time_seconds": total_time,
+                                "steps": 2
+                            })
+            
+            return routes
+    
+    def _find_bridge(self, source_chain: str, destination_chain: str) -> Optional[str]:
+        """Find bridge contract"""
+        for bridge_name, bridge_config in BRIDGE_CONTRACTS.items():
+            if (source_chain, destination_chain) in bridge_config["supported_pairs"]:
+                return bridge_name
+        return None
+    
+    def _estimate_completion_time(self, source_chain: str, destination_chain: str) -> str:
+        """Estimate completion time"""
+        base_times = {
+            ("ethereum", "polygon"): 10,
+            ("polygon", "ethereum"): 30,
+            ("ethereum", "arbitrum"): 7,
+            ("arbitrum", "ethereum"): 7,
+            ("ethereum", "optimism"): 5,
+            ("optimism", "ethereum"): 20
+        }
+        estimated_minutes = base_times.get((source_chain, destination_chain), 15)
+        return f"{estimated_minutes} minutes"
+    
+    def _parse_completion_time(self, time_str: str) -> int:
+        """Parse completion time"""
+        if "minute" in time_str:
+            return int(time_str.split()[0]) * 60
+        elif "hour" in time_str:
+            return int(time_str.split()[0]) * 3600
+        return 900
+    
+    def _generate_transaction_id(self) -> str:
+        """Generate transaction ID"""
+        return f"bridge_{int(time.time())}_{hashlib.sha256(str(time.time()).encode()).hexdigest()[:8]}"
+    
+    async def _validate_asset_support(self, asset: str, source_chain: str, 
+                                    destination_chain: str) -> Dict[str, Any]:
+        """Validate asset support"""
+        supported_assets = await self._get_supported_assets(source_chain, destination_chain)
+        for supported_asset in supported_assets["assets"]:
+            if (asset.upper() == supported_asset["symbol"] or 
+                asset.lower() in supported_asset.get("addresses", {}).values()):
+                return {"supported": True}
+        return {"supported": False, "error": f"Asset {asset} not supported for this bridge"}
+    
+    async def _check_balance(self, address: str, asset: str, amount: str, 
+                           chain: str, w3_connections: Dict[str, Web3]) -> Dict[str, Any]:
+        """Check balance"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                w3 = w3_connections.get(chain)
+                if not w3:
+                    return {"sufficient": False, "error": "Web3 connection not available"}
+                
+                amount_wei = Web3.to_wei(Decimal(amount), "ether") if asset.upper() == SUPPORTED_CHAINS[chain]["native_token"] else int(amount)
+                
+                if asset.upper() == SUPPORTED_CHAINS[chain]["native_token"]:
+                    balance = w3.eth.get_balance(to_checksum_address(address))
+                else:
+                    assets = await self._get_supported_assets(chain)
+                    token_address = next((a["addresses"][chain] for a in assets["assets"] if a["symbol"] == asset.upper()), None)
+                    if not token_address:
+                        return {"sufficient": False, "error": f"Token {asset} not supported on {chain}"}
+                    
+                    contract = w3.eth.contract(
+                        address=to_checksum_address(token_address),
+                        abi=[{"constant": True, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"}]
+                    )
+                    balance = contract.functions.balanceOf(to_checksum_address(address)).call()
+                
+                return {
+                    "sufficient": balance >= amount_wei,
+                    "balance": str(Web3.from_wei(balance, "ether") if asset.upper() == SUPPORTED_CHAINS[chain]["native_token"] else balance),
+                    "required": str(amount)
+                }
+            
+            except Exception as e:
+                return {"sufficient": False, "error": str(e)}
+    
+    async def _check_network_congestion(self, source_chain: str, 
+                                      destination_chain: str, w3_connections: Dict[str, Web3]) -> Dict[str, Any]:
+        """Check network congestion"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                source_w3 = w3_connections.get(source_chain)
+                dest_w3 = w3_connections.get(destination_chain)
+                
+                source_congestion = 0.5
+                dest_congestion = 0.5
+                
+                if source_w3:
+                    gas_price = source_w3.eth.gas_price
+                    source_congestion = min(gas_price / (100 * 10**9), 1.0)
+                if dest_w3:
+                    gas_price = dest_w3.eth.gas_price
+                    dest_congestion = min(gas_price / (100 * 10**9), 1.0)
+                
+                high_congestion = source_congestion > 0.6 or dest_congestion > 0.6
+                congested_chain = source_chain if source_congestion > dest_congestion else destination_chain
+                
+                return {
+                    "high_congestion": high_congestion,
+                    "congested_chain": congested_chain if high_congestion else None,
+                    "source_congestion": source_congestion,
+                    "destination_congestion": dest_congestion
+                }
+            
+            except Exception as e:
+                return {"high_congestion": False, "error": str(e)}
+    
+    def _get_api_documentation(self) -> str:
+        """Get API documentation"""
+        return """# Cross-Chain Bridge Assistant API Documentation
+
+## Overview
+The Cross-Chain Bridge Assistant provides a secure platform for managing cross-chain asset transfers.
+
+## Supported Networks
+- Ethereum Mainnet (chain_id: 1)
+- Polygon (chain_id: 137)
+- Arbitrum One (chain_id: 42161)
+- Optimism (chain_id: 10)
+
+## Supported Bridges
+- Polygon Bridge
+- Arbitrum Bridge
+- Optimism Bridge
+
+## Tools
+### estimate_bridge_fees
+Estimate fees for cross-chain transfer.
+- **Parameters**: source_chain, destination_chain, asset, amount, priority
+- **Returns**: FeeEstimate (Pydantic model with fee breakdown)
+
+### execute_bridge_transfer
+Execute a cross-chain transfer.
+- **Parameters**: source_chain, destination_chain, asset, amount, recipient, private_key, max_fee, deadline
+- **Returns**: BridgeTransaction (Pydantic model with transaction details)
+
+### monitor_bridge_events
+Monitor bridge contract events.
+- **Parameters**: bridge_contract, event_types, from_block, duration
+- **Returns**: List[BridgeEvent] (Pydantic model with event details)
+
+### get_bridge_status
+Get bridge status.
+- **Parameters**: bridge_contract, include_liquidity
+- **Returns**: Dict[str, BridgeStatus] (Pydantic model with status details)
+
+### get_transaction_history
+Get transaction history.
+- **Parameters**: address, source_chain, destination_chain, status, limit, offset
+- **Returns**: List[BridgeTransaction]
+
+### validate_bridge_transaction
+Validate a transaction.
+- **Parameters**: source_chain, destination_chain, asset, amount, sender, recipient
+- **Returns**: Dict with validation results
+
+### get_supported_assets
+Get supported assets.
+- **Parameters**: source_chain, destination_chain
+- **Returns**: Dict with asset details
+
+### cancel_bridge_transaction
+Cancel a pending transaction.
+- **Parameters**: transaction_id, private_key
+- **Returns**: Dict with cancellation status
+
+### get_bridge_analytics
+Get bridge analytics.
+- **Parameters**: time_range, bridge_contract, metric_type
+- **Returns**: Dict with analytics data
+
+### optimize_bridge_route
+Optimize bridge route.
+- **Parameters**: source_chain, destination_chain, asset, amount, optimization_goal
+- **Returns**: Dict with route details
+
+## Security
+- OAuth 2.1 authentication with required scopes: bridge:read, bridge:write
+- HMAC signature verification
+- Balance and congestion checks
+- Persistent storage with SQLite
+
+## Setup
+1. Install dependencies: `pip install -r requirements.txt`
+2. Set environment variables in `.env`:
+   - INFURA_PROJECT_ID
+   - ETHERSCAN_API_KEY
+   - HMAC_SECRET
+   - AUTH_ISSUER_URL
+   - AUTH_SERVER_URL
+3. Run the server: `mcp run cross_chain_bridge_assistant.py`
+"""
+
+if __name__ == "__main__":
+    server = CrossChainBridgeServer()
+    server.mcp.run(transport="streamable-http")
