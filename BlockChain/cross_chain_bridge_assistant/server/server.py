@@ -273,4 +273,25 @@ class CrossChainBridgeServer:
         async def get_chain_config() -> str:
             """Get supported chain configurations"""
             return json.dumps(SUPPORTED_CHAINS, indent=2)
+        @self.mcp.resource("bridge://config/contracts")
+        async def get_contracts_config() -> str:
+            """Get bridge contract configurations"""
+            return json.dumps({k: {kk: vv for kk, vv in v.items() if kk != "abi"} for k, v in BRIDGE_CONTRACTS.items()}, indent=2)
         
+        @self.mcp.resource("bridge://status/networks")
+        async def get_network_status() -> str:
+            """Get real-time network status"""
+            return json.dumps(await self._get_network_status(), indent=2)
+        
+        @self.mcp.resource("bridge://analytics/overview")
+        async def get_analytics_overview() -> str:
+            """Get bridge analytics overview"""
+            return json.dumps(await self._get_analytics_overview(), indent=2)
+        
+        @self.mcp.resource("bridge://documentation/api")
+        async def get_api_documentation() -> str:
+            """Get API documentation"""
+            return self._get_api_documentation()
+        
+        
+           
