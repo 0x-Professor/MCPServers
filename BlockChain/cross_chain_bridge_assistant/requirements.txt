@@ -1,0 +1,10 @@
+fastmcp
+httpx
+web3
+python-dotenv
+cachetools
+aiohttp
+requests
+pydantic
+sqlalchemy
+
