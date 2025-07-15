@@ -250,7 +250,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "sqlalchemy", specifier = ">=2.0.41" },
-    { name = "web3", specifier = ">=7.12.1" },
+    { name = "web3", specifier = ">=6.11.0" },
 ]
 
 [[package]]

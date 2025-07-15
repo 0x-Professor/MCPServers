@@ -33,21 +33,20 @@ from dotenv import load_dotenv
 import aiohttp
 import requests
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
 from web3.exceptions import TransactionNotFound
 from eth_account import Account
 from eth_utils import to_checksum_address, is_address
 from pydantic import BaseModel, Field
 from mcp.server.fastmcp import FastMCP
-from mcp.types import Completion, CompletionArgument, CompletionContext, Resource, ResourceTemplateReference
-from mcp.server.auth.provider import TokenVerifier, TokenInfo
+from mcp.types import Completion, CompletionArgument, CompletionContext, ResourceTemplateReference
+from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 import sqlite3
 from cachetools import TTLCache
 
 load_dotenv()
-INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "YOUR_PROJECT_ID")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "YOUR_ETHERSCAN_API_KEY")
+INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "7464fe4568974a00b5cf20e94ebc4833")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ")
 HMAC_SECRET = os.getenv("HMAC_SECRET", "your-secret-key")
 AUTH_ISSUER_URL = os.getenv("AUTH_ISSUER_URL", "https://auth.example.com")
 AUTH_SERVER_URL = os.getenv("AUTH_SERVER_URL", "http://localhost:3001")
@@ -181,6 +180,12 @@ class SimpleTokenVerifier(TokenVerifier):
                     raise ValueError("Invalid token")
             except Exception as e:
                 raise ValueError(f"Token verification failed: {str(e)}")
+
+@dataclass
+class TokenInfo:
+    sub: str
+    scopes: List[str]
+    expires_at: datetime
 
 @dataclass
 class AppContext:
