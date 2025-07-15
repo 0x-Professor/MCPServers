@@ -293,5 +293,127 @@ class CrossChainBridgeServer:
             """Get API documentation"""
             return self._get_api_documentation()
         
+        @self.mcp.tool()
+        async def estimate_bridge_fees(
+            source_chain: str,
+            destination_chain: str,
+            asset: str,
+            amount: str,
+            priority: str = "medium"
+        ) -> FeeEstimate:
+            """Estimate fees for cross-chain transfer"""
+            result = await self._estimate_bridge_fees(source_chain, destination_chain, asset, amount, priority)
+            if "error" in result:
+                raise ValueError(result["error"])
+            return FeeEstimate(**result["fees"], estimated_time=result["estimated_completion_time"],
+                            gas_price=result["gas_estimates"]["source_gas_price"],
+                            gas_limit=result["gas_estimates"]["source_gas_limit"])
         
+        @self.mcp.tool()
+        async def execute_bridge_transaction(
+            source_chain: str,
+            destination_chain: str,
+            asset: str,
+            amount: str,
+            recipient: str,
+            private_key: str,
+            max_fee: str = "0.01",
+            deadline: str = ""
+        ) -> BridgeTransaction:
+            """Execute cross-chain transfer"""
+            result = await self._execute_bridge_transfer(source_chain, destination_chain, asset, amount,
+                                                      recipient, private_key, max_fee, deadline)
+            if "error" in result:
+                raise ValueError(result["error"])
+            return BridgeTransaction(**result, status="pending")
+        
+        @self.mcp.tool()
+        async def monitor_bridge_events(
+            bridge_contract: str,
+            event_types: List[str] = None,
+            from_block: str = "latest",
+            duration: int = 300
+        ) -> List[BridgeEvent]:
+            """Monitor bridge contract events"""
+            result = await self._monitor_bridge_events(bridge_contract, event_types, from_block, duration)
+            if "error" in result:
+                raise ValueError(result["error"])
+            return [BridgeEvent(**event) for event in result["events"]]
+        
+        @self.mcp.tool()
+        async def get_bridge_status(
+            bridge_contract: Optional[str] = None,
+            include_liquidity: bool = True
+        ) -> Dict[str, BridgeStatus]:
+            """Get bridge status"""
+            result = await self._get_bridge_status(bridge_contract, include_liquidity)
+            if "error" in result:
+                raise ValueError(result["error"])
+            return {k: BridgeStatus(**v) for k, v in result["bridge_status"].items()}
+        
+        @self.mcp.tool()
+        async def get_transaction_history(
+            address: Optional[str] = None,
+            source_chain: Optional[str] = None,
+            destination_chain: Optional[str] = None,
+            status: Optional[str] = None,
+            limit: int = 50,
+            offset: int = 0
+        ) -> List[BridgeTransaction]:
+            """Get transaction history"""
+            result = await self._get_transaction_history(address, source_chain, destination_chain, status, limit, offset)
+            if "error" in result:
+                raise ValueError(result["error"])
+            return [BridgeTransaction(**tx) for tx in result["transactions"]]
+        
+        @self.mcp.tool()
+        async def validate_bridge_transaction(
+            source_chain: str,
+            destination_chain: str,
+            asset: str,
+            amount: str,
+            sender: str,
+            recipient: str
+        ) -> Dict[str, Any]:
+            """Validate bridge transaction"""
+            return await self._validate_bridge_transaction(source_chain, destination_chain, asset, amount, sender, recipient)
            
+        @self.mcp.tool()
+        async def get_supported_assets(
+            source_chain: Optional[str] = None,
+            destination_chain: Optional[str] = None
+        ) -> Dict[str, Any]:
+            """Get supported assets"""
+            return await self._get_supported_assets(source_chain, destination_chain)
+        
+        @self.mcp.tool()
+        async def cancel_bridge_transaction(
+            transaction_id: str,
+            private_key: str
+        ) -> Dict[str, Any]:
+            """Cancel pending transaction"""
+            return await self._cancel_bridge_transaction(transaction_id, private_key)
+        
+        
+        @self.mcp.tool()
+        async def get_bridge_analytics(
+            time_range: str = "24h",
+            bridge_contract: Optional[str] = None,
+            metric_type: str = "volume"
+        ) -> Dict[str, Any]:
+            """Get bridge analytics"""
+            return await self._get_bridge_analytics(time_range, bridge_contract, metric_type)
+        
+        @self.mcp.tool()
+        async def optimize_bridge_route(
+            source_chain: str,
+            destination_chain: str,
+            asset: str,
+            amount: str,
+            optimization_goal: str = "lowest_cost"
+        ) -> Dict[str, Any]:
+            """Optimize bridge route"""
+            return await self._optimize_bridge_route(source_chain, destination_chain, asset, amount, optimization_goal)
+        
+        
+        
