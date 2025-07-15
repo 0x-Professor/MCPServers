@@ -1602,5 +1602,7 @@ Optimize bridge route.
 
 server = CrossChainBridgeServer().mcp
 
-if __name__ == "__main__":
-    server.run(transport="streamable-http")
+#if __name__ == "__main__":
+    #server.run(transport="streamable-http") 
+#uncomment if you want to run it through streamable http 
+#otherwise for locally testing you can remain it commented and run the server through MCP CLI using MCP inspector client 
