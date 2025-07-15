@@ -163,3 +163,114 @@ class BridgeStatus(BaseModel):
    last_updated: str = Field(..., description="Timestamp of the last status update")
    liquidity: Optional[Dict[str, Dict[str, str]]] = Field(default=None, description="Current liquidity available in the bridge")
    
+class SimpleTokenVerifier(TokenVerifier):
+    async def verify_token(self, token: str) -> TokenInfo:
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    f"{AUTH_ISSUER_URL}/introspect",
+                    json={"token": token}
+                ) as response:
+                    data = await response.json()
+                    if data.get("active", False):
+                        return TokenInfo(
+                            sub=data.get("sub", ""),
+                            scopes=data.get("scope", "").split(),
+                            expires_at=datetime.fromtimestamp(data.get("exp", 0))
+                        )
+                    raise ValueError("Invalid token")
+            except Exception as e:
+                raise ValueError(f"Token verification failed: {str(e)}")
+
+@dataclass
+class AppContext:
+    web3_connections: Dict[str, Web3]
+    db_connection: sqlite3.Connection
+    abi_cache: TTLCache
+    gas_price_cache: TTLCache
+    
+class CrossChainBridgeServer:
+    """MCP server for cross-chain bridge operations."""
+    def __init__(self):
+        self.mcp = FastMCP(
+            name = "CrossChainBridge",
+            stateless_http = True,
+            dependencies = ["web3", "httpx", "python-dotenv", "cachetools", "aiohttp", "requests", "pydantic", "sqlalchemy"],
+            auth = AuthSettings(
+                issuer_url=AUTH_ISSUER_URL,
+                resource_server_url=AUTH_SERVER_URL,
+                required_scopes = ["bridge:read", "bridge:write"],
+                ),
+            token_verifier = SimpleTokenVerifier(),
+            lifespan = self._app_lifespan,
+            
+            )
+        self.transactions: Dict[str, BridgeTransaction] = {}
+        self._setup_handlers()
+    
+    @asynccontextmanager
+    async def _app_lifespan(self, server: FastMCP) -> AsyncIterator[AppContext]:
+        """Manage server lifecycle"""
+        web3_connections = {}
+        db_connection = self._initialize_db()
+        abi_cache = TTLCache(maxsize=100, ttl=3600)
+        gas_price_cache = TTLCache(maxsize=50, ttl=300)
+        
+        try:
+            # Initialize Web3 connections
+            for chain_name, chain_config in SUPPORTED_CHAINS.items():
+                try:
+                    w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
+                    if chain_name == "polygon":
+                        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+                    if w3.is_connected():
+                        web3_connections[chain_name] = w3
+                        logger.info(f"Connected to {chain_name} network")
+                    else:
+                        logger.warning(f"Failed to connect to {chain_name} network")
+                except Exception as e:
+                    logger.error(f"Error connecting to {chain_name}: {e}")
+            
+            yield AppContext(
+                web3_connections=web3_connections,
+                db_connection=db_connection,
+                abi_cache=abi_cache,
+                gas_price_cache=gas_price_cache
+            )
+        finally:
+            db_connection.close()
+            logger.info("Server shutdown: Closed database connection")
+    
+    def _initialize_db(self) -> sqlite3.Connection:
+        """Initialize SQLite database for transaction tracking"""
+        conn = sqlite3.connect("bridge_transactions.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id TEXT PRIMARY KEY,
+                source_chain TEXT,
+                destination_chain TEXT,
+                asset TEXT,
+                amount TEXT,
+                sender TEXT,
+                recipient TEXT,
+                status TEXT,
+                source_tx_hash TEXT,
+                destination_tx_hash TEXT,
+                created_at TEXT,
+                completed_at TEXT,
+                estimated_completion TEXT,
+                fee TEXT,
+                bridge_contract TEXT,
+                signature TEXT
+            )
+        """)
+        conn.commit()
+        return conn
+    def _setup_handlers(self):
+        """Setup MCP handlers for various operations"""
+        @self.mcp.resource("bridge://config/chains")
+        async def get_chain_config() -> str:
+            """Get supported chain configurations"""
+            return json.dumps(SUPPORTED_CHAINS, indent=2)
+        
