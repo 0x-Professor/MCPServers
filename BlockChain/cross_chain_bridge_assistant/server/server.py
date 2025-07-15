@@ -437,4 +437,723 @@ class CrossChainBridgeServer:
                     return Completion(values=filtered)
             return None
     
-     
+    async def _estimate_bridge_fees(self, source_chain: str, destination_chain: str, 
+                                   asset: str, amount: str, priority: str = "medium") -> Dict[str, Any]:
+        """Estimate fees for cross-chain transfer"""
+        ctx = self.mcp.get_context()
+        w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                if source_chain not in SUPPORTED_CHAINS or destination_chain not in SUPPORTED_CHAINS:
+                    return {"error": f"Unsupported chain: {source_chain} or {destination_chain}"}
+                
+                bridge_name = self._find_bridge(source_chain, destination_chain)
+                if not bridge_name:
+                    return {"error": f"No bridge available for {source_chain} -> {destination_chain}"}
+                
+                bridge_config = BRIDGE_CONTRACTS[bridge_name]
+                source_w3 = w3_connections.get(source_chain)
+                dest_w3 = w3_connections.get(destination_chain)
+                
+                if not source_w3 or not dest_w3:
+                    return {"error": "Web3 connection not available"}
+                
+                abi_cache = ctx.request_context.lifespan_context["abi_cache"]
+                gas_price_cache = ctx.request_context.lifespan_context["gas_price_cache"]
+                
+                source_gas_price = await self._get_cached_gas_price(source_chain, source_w3, priority, gas_price_cache)
+                dest_gas_price = await self._get_cached_gas_price(destination_chain, dest_w3, priority, gas_price_cache)
+                
+                source_contract = source_w3.eth.contract(
+                    address=to_checksum_address(bridge_config[f"{source_chain}_address"]),
+                    abi=await self._get_contract_abi(bridge_name, source_chain, abi_cache)
+                )
+                source_gas_limit = source_contract.functions.depositFor(
+                    to_checksum_address("0x" + "0" * 40),
+                    Web3.to_wei(Decimal(amount), "ether") if asset.upper() == SUPPORTED_CHAINS[source_chain]["native_token"] else 0
+                ).estimate_gas({"from": to_checksum_address("0x" + "0" * 40)})
+                
+                dest_contract = dest_w3.eth.contract(
+                    address=to_checksum_address(bridge_config[f"{destination_chain}_address"]),
+                    abi=await self._get_contract_abi(bridge_name, destination_chain, abi_cache)
+                )
+                dest_gas_limit = dest_contract.functions.release(
+                    to_checksum_address("0x" + "0" * 40),
+                    Web3.to_wei(Decimal(amount), "ether") if asset.upper() == SUPPORTED_CHAINS[destination_chain]["native_token"] else 0
+                ).estimate_gas({"from": to_checksum_address("0x" + "0" * 40)}) if "release" in [f["name"] for f in bridge_config["abi"]] else 80000
+                
+                source_fee = str(Web3.from_wei(source_gas_price * source_gas_limit, "ether"))
+                dest_fee = str(Web3.from_wei(dest_gas_price * dest_gas_limit, "ether"))
+                bridge_base_fee = float(bridge_config["fee_structure"]["base_fee"])
+                bridge_percentage = float(bridge_config["fee_structure"]["percentage_fee"])
+                bridge_fee = bridge_base_fee + (float(amount) * bridge_percentage)
+                total_fee = float(source_fee) + float(dest_fee) + bridge_fee
+                
+                return {
+                    "fees": {
+                        "source_chain_fee": source_fee,
+                        "destination_chain_fee": dest_fee,
+                        "bridge_fee": str(bridge_fee),
+                        "total_fee": str(total_fee)
+                    },
+                    "gas_estimates": {
+                        "source_gas_price": str(source_gas_price),
+                        "source_gas_limit": str(source_gas_limit),
+                        "dest_gas_price": str(dest_gas_price),
+                        "dest_gas_limit": str(dest_gas_limit)
+                    },
+                    "estimated_completion_time": self._estimate_completion_time(source_chain, destination_chain),
+                    "bridge_contract": bridge_name,
+                    "priority": priority
+                }
+            except Exception as e:
+                logger.error(f"Error estimating fees: {e}")
+                return {"error": str(e)}
+    
+    async def _execute_bridge_transfer(self, source_chain: str, destination_chain: str,
+                                     asset: str, amount: str, recipient: str,
+                                     private_key: str, max_fee: str, deadline: str) -> Dict[str, Any]:
+        """Execute cross-chain transfer"""
+        ctx = self.mcp.get_context()
+        w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                validation_result = await self._validate_bridge_transaction(
+                    source_chain, destination_chain, asset, amount,
+                    Account.from_key(private_key).address, recipient
+                )
+                if "error" in validation_result:
+                    return validation_result
+                
+                fee_estimate = await self._estimate_bridge_fees(source_chain, destination_chain, asset, amount)
+                if "error" in fee_estimate:
+                    return fee_estimate
+                
+                if float(fee_estimate["fees"]["total_fee"]) > float(max_fee):
+                    return {
+                        "error": "Transaction fee exceeds maximum allowed",
+                        "estimated_fee": fee_estimate["fees"]["total_fee"],
+                        "max_fee": max_fee
+                    }
+                
+                tx_id = self._generate_transaction_id()
+                signature = self._generate_hmac_signature(tx_id, source_chain, destination_chain, amount, recipient)
+                
+                transaction = BridgeTransaction(
+                    id=tx_id,
+                    source_chain=source_chain,
+                    destination_chain=destination_chain,
+                    asset=asset,
+                    amount=amount,
+                    sender=Account.from_key(private_key).address,
+                    recipient=recipient,
+                    status=TransactionStatus.PENDING.value,
+                    created_at=datetime.now().isoformat(),
+                    fees=FeeEstimate(**fee_estimate["fees"],
+                                  estimated_time=fee_estimate["estimated_completion_time"],
+                                  gas_price=fee_estimate["gas_estimates"]["source_gas_price"],
+                                  gas_limit=fee_estimate["gas_estimates"]["source_gas_limit"]),
+                    bridge_contract=fee_estimate["bridge_contract"],
+                    signature=signature
+                )
+                self._save_transaction(transaction)
+                
+                max_attempts = 3
+                for attempt in range(max_attempts):
+                    try:
+                        bridge_result = await self._execute_bridge_contract(
+                            transaction, private_key, fee_estimate, w3_connections
+                        )
+                        if bridge_result["success"]:
+                            transaction.source_tx_hash = bridge_result["transaction_hash"]
+                            transaction.status = TransactionStatus.PENDING.value
+                            transaction.estimated_completion = (datetime.now() + timedelta(
+                                seconds=self._parse_completion_time(fee_estimate["estimated_completion_time"])
+                            )).isoformat()
+                            self._save_transaction(transaction)
+                            
+                            asyncio.create_task(self._monitor_transaction_completion(transaction))
+                            
+                            return asdict(transaction)
+                    except Exception as e:
+                        if attempt < max_attempts - 1:
+                            logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying...")
+                            await asyncio.sleep(5)
+                        else:
+                            transaction.status = TransactionStatus.FAILED.value
+                            self._save_transaction(transaction)
+                            return {"error": str(e), "transaction_id": tx_id, "status": "failed"}
+                
+                return {"error": "All attempts failed", "transaction_id": tx_id, "status": "failed"}
+            
+            except Exception as e:
+                logger.error(f"Error executing bridge transfer: {e}")
+                return {"error": str(e)}
+    
+    
+    async def _monitor_bridge_events(self, bridge_contract: str, event_types: List[str] = None,
+                                   from_block: str = "latest", duration: int = 300) -> Dict[str, Any]:
+        """Monitor bridge contract events"""
+        ctx = self.mcp.get_context()
+        w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                if bridge_contract not in BRIDGE_CONTRACTS:
+                    return {"error": "Unknown bridge contract"}
+                
+                if event_types is None:
+                    event_types = ["TransferInitiated", "TransferCompleted"]
+                
+                bridge_config = BRIDGE_CONTRACTS[bridge_contract]
+                events = []
+                
+                for chain_pair in bridge_config["supported_pairs"]:
+                    source_chain, dest_chain = chain_pair
+                    source_w3 = w3_connections.get(source_chain)
+                    dest_w3 = w3_connections.get(dest_chain)
+                    
+                    if not source_w3 or not dest_w3:
+                        return {"error": f"Web3 connection not available for {source_chain} or {dest_chain}"}
+                    
+                    abi_cache = ctx.request_context.lifespan_context["abi_cache"]
+                    source_contract = source_w3.eth.contract(
+                        address=to_checksum_address(bridge_config[f"{source_chain}_address"]),
+                        abi=await self._get_contract_abi(bridge_contract, source_chain, abi_cache)
+                    )
+                    dest_contract = dest_w3.eth.contract(
+                        address=to_checksum_address(bridge_config[f"{dest_chain}_address"]),
+                        abi=await self._get_contract_abi(bridge_contract, dest_chain, abi_cache)
+                    )
+                    
+                    for event_type in event_types:
+                        try:
+                            event_filter = source_contract.events[event_type].create_filter(fromBlock=from_block)
+                            dest_filter = dest_contract.events[event_type].create_filter(fromBlock=from_block)
+                            
+                            start_time = time.time()
+                            while time.time() - start_time < duration:
+                                for event in event_filter.get_new_entries() + dest_filter.get_new_entries():
+                                    events.append({
+                                        "event_type": event["event"],
+                                        "transaction_hash": event["transactionHash"].hex(),
+                                        "block_number": event["blockNumber"],
+                                        "timestamp": datetime.fromtimestamp(source_w3.eth.get_block(event["blockNumber"]).timestamp).isoformat(),
+                                        "data": {k: str(v) for k, v in event["args"].items()}
+                                    })
+                                await asyncio.sleep(10)
+                        except Exception as e:
+                            logger.warning(f"Error monitoring {event_type}: {e}")
+                
+                return {
+                    "bridge_contract": bridge_contract,
+                    "monitoring_duration": duration,
+                    "events_found": len(events),
+                    "events": events,
+                    "status": "completed",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            except Exception as e:
+                logger.error(f"Error monitoring bridge events: {e}")
+                return {"error": str(e)}
+            
+    async def _get_bridge_status(self, bridge_contract: Optional[str] = None, 
+                               include_liquidity: bool = True) -> Dict[str, Any]:
+        """Get bridge status"""
+        ctx = self.mcp.get_context()
+        w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                status_data = {}
+                
+                if bridge_contract:
+                    if bridge_contract not in BRIDGE_CONTRACTS:
+                        return {"error": "Unknown bridge contract"}
+                    bridge_config = BRIDGE_CONTRACTS[bridge_contract]
+                    status_data[bridge_contract] = await self._get_single_bridge_status(
+                        bridge_contract, bridge_config, include_liquidity, w3_connections
+                    )
+                else:
+                    for bridge_name, bridge_config in BRIDGE_CONTRACTS.items():
+                        status_data[bridge_name] = await self._get_single_bridge_status(
+                            bridge_name, bridge_config, include_liquidity, w3_connections
+                        )
+                
+                return {
+                    "timestamp": datetime.now().isoformat(),
+                    "bridge_status": status_data,
+                    "network_status": await self._get_network_status()
+                }
+            
+            except Exception as e:
+                logger.error(f"Error getting bridge status: {e}")
+                return {"error": str(e)}
+    
+    async def _get_single_bridge_status(self, bridge_name: str, bridge_config: Dict[str, Any],
+                                      include_liquidity: bool, w3_connections: Dict[str, Web3]) -> Dict[str, Any]:
+        """Get status for a single bridge"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                abi_cache = self.mcp.get_context().request_context.lifespan_context["abi_cache"]
+                status = {
+                    "name": bridge_name,
+                    "supported_pairs": bridge_config["supported_pairs"],
+                    "fee_structure": bridge_config["fee_structure"],
+                    "operational": True,
+                    "last_updated": datetime.now().isoformat()
+                }
+                
+                if include_liquidity:
+                    liquidity = {}
+                    for chain_pair in bridge_config["supported_pairs"]:
+                        chain = chain_pair[0]
+                        w3 = w3_connections.get(chain)
+                        if w3:
+                            contract = w3.eth.contract(
+                                address=to_checksum_address(bridge_config[f"{chain}_address"]),
+                                abi=await self._get_contract_abi(bridge_name, chain, abi_cache)
+                            )
+                            try:
+                                tvl = contract.functions.totalSupply().call() if "totalSupply" in [f["name"] for f in bridge_config["abi"]] else 0
+                                liquidity[chain] = {
+                                    "total_value_locked": str(Web3.from_wei(tvl, "ether")),
+                                    "available_liquidity": str(Web3.from_wei(tvl * 0.9, "ether")),
+                                    "utilization_rate": "0.1"
+                                }
+                            except Exception as e:
+                                liquidity[chain] = {"error": str(e)}
+                    status["liquidity"] = liquidity
+                
+                return status
+            
+            except Exception as e:
+                logger.error(f"Error getting single bridge status: {e}")
+                return {"error": str(e)}
+    
+    async def _get_transaction_history(self, address: Optional[str] = None, source_chain: Optional[str] = None,
+                                     destination_chain: Optional[str] = None, status: Optional[str] = None,
+                                     limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """Get transaction history"""
+        ctx = self.mcp.get_context()
+        db_connection = ctx.request_context.lifespan_context["db_connection"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                cursor = db_connection.cursor()
+                query = "SELECT * FROM transactions WHERE 1=1"
+                params = []
+                
+                if address:
+                    query += " AND (sender = ? OR recipient = ?)"
+                    params.extend([address, address])
+                if source_chain:
+                    query += " AND source_chain = ?"
+                    params.append(source_chain)
+                if destination_chain:
+                    query += " AND destination_chain = ?"
+                    params.append(destination_chain)
+                if status:
+                    query += " AND status = ?"
+                    params.append(status)
+                
+                query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+                
+                cursor.execute(query, params)
+                transactions = [dict(zip([c[0] for c in cursor.description], row)) for row in cursor.fetchall()]
+                
+                if address and source_chain:
+                    etherscan_txs = await self._fetch_etherscan_history(address, source_chain, limit)
+                    for tx in etherscan_txs:
+                        tx_id = f"etherscan_{tx['hash']}"
+                        if tx_id not in self.transactions:
+                            transaction = BridgeTransaction(
+                                id=tx_id,
+                                source_chain=source_chain,
+                                destination_chain="unknown",
+                                asset="ETH",
+                                amount=str(Web3.from_wei(int(tx["value"]), "ether")),
+                                sender=tx["from"],
+                                recipient=tx["to"],
+                                status=TransactionStatus.CONFIRMED.value,
+                                source_tx_hash=tx["hash"],
+                                created_at=datetime.fromtimestamp(int(tx["timeStamp"])).isoformat()
+                            )
+                            self._save_transaction(transaction, db_connection)
+                            transactions.append(asdict(transaction))
+                
+                transactions.sort(key=lambda x: x["created_at"] or "", reverse=True)
+                paginated_transactions = transactions[offset:offset + limit]
+                
+                return {
+                    "transactions": paginated_transactions,
+                    "total_count": len(transactions),
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": len(transactions) > offset + limit
+                }
+            
+            except Exception as e:
+                logger.error(f"Error getting transaction history: {e}")
+                return {"error": str(e)}
+    
+    async def _validate_bridge_transaction(self, source_chain: str, destination_chain: str,
+                                         asset: str, amount: str, sender: str,
+                                         recipient: str) -> Dict[str, Any]:
+        """Validate bridge transaction"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                validation_errors = []
+                warnings = []
+                
+                if source_chain not in SUPPORTED_CHAINS:
+                    validation_errors.append(f"Unsupported source chain: {source_chain}")
+                if destination_chain not in SUPPORTED_CHAINS:
+                    validation_errors.append(f"Unsupported destination chain: {destination_chain}")
+                
+                if not self._find_bridge(source_chain, destination_chain):
+                    validation_errors.append(f"No bridge available for {source_chain} -> {destination_chain}")
+                
+                if not is_address(sender):
+                    validation_errors.append("Invalid sender address")
+                if not is_address(recipient):
+                    validation_errors.append("Invalid recipient address")
+                
+                try:
+                    amount_decimal = Decimal(amount)
+                    if amount_decimal <= 0:
+                        validation_errors.append("Amount must be positive")
+                    if amount_decimal < Decimal("0.001"):
+                        warnings.append("Amount is very small, consider gas fees")
+                except:
+                    validation_errors.append("Invalid amount format")
+                
+                asset_validation = await self._validate_asset_support(asset, source_chain, destination_chain)
+                if not asset_validation["supported"]:
+                    validation_errors.append(asset_validation["error"])
+                
+                w3_connections = self.mcp.get_context().request_context.lifespan_context["web3_connections"]
+                if source_chain in w3_connections:
+                    balance_check = await self._check_balance(sender, asset, amount, source_chain, w3_connections)
+                    if not balance_check["sufficient"]:
+                        validation_errors.append(balance_check["error"])
+                
+                congestion_check = await self._check_network_congestion(source_chain, destination_chain, w3_connections)
+                if congestion_check["high_congestion"]:
+                    warnings.append(f"High network congestion on {congestion_check['congested_chain']}")
+                
+                return {
+                    "valid": len(validation_errors) == 0,
+                    "errors": validation_errors,
+                    "warnings": warnings,
+                    "estimated_fee": await self._estimate_bridge_fees(source_chain, destination_chain, asset, amount) if len(validation_errors) == 0 else None
+                }
+            
+            except Exception as e:
+                logger.error(f"Error validating transaction: {e}")
+                return {"error": str(e)}
+            
+    
+    async def _get_supported_assets(self, source_chain: Optional[str] = None, 
+                                  destination_chain: Optional[str] = None) -> Dict[str, Any]:
+        """Get supported assets"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                common_assets = [
+                    {
+                        "symbol": "ETH",
+                        "name": "Ethereum",
+                        "decimals": 18,
+                        "type": "native",
+                        "supported_chains": ["ethereum", "arbitrum", "optimism"]
+                    },
+                    {
+                        "symbol": "USDC",
+                        "name": "USD Coin",
+                        "decimals": 6,
+                        "type": "erc20",
+                        "addresses": {
+                            "ethereum": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                            "polygon": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+                            "arbitrum": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8"
+                        }
+                    },
+                    {
+                        "symbol": "USDT",
+                        "name": "Tether USD",
+                        "decimals": 6,
+                        "type": "erc20",
+                        "addresses": {
+                            "ethereum": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+                            "polygon": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+                            "arbitrum": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+                        }
+                    },
+                    {
+                        "symbol": "DAI",
+                        "name": "Dai Stablecoin",
+                        "decimals": 18,
+                        "type": "erc20",
+                        "addresses": {
+                            "ethereum": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+                            "polygon": "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063"
+                        }
+                    }
+                ]
+                
+                if source_chain or destination_chain:
+                    filtered_assets = []
+                    for asset in common_assets:
+                        if asset["type"] == "native":
+                            if source_chain and SUPPORTED_CHAINS.get(source_chain, {}).get("native_token") != asset["symbol"]:
+                                continue
+                            if destination_chain and SUPPORTED_CHAINS.get(destination_chain, {}).get("native_token") != asset["symbol"]:
+                                continue
+                        elif asset["type"] == "erc20":
+                            if source_chain and source_chain not in asset.get("addresses", {}):
+                                continue
+                            if destination_chain and destination_chain not in asset.get("addresses", {}):
+                                continue
+                        filtered_assets.append(asset)
+                    return {
+                        "assets": filtered_assets,
+                        "source_chain": source_chain,
+                        "destination_chain": destination_chain
+                    }
+                
+                return {"assets": common_assets}
+            
+            except Exception as e:
+                logger.error(f"Error getting supported assets: {e}")
+                return {"error": str(e)}
+    
+    
+    async def _cancel_bridge_transaction(self, transaction_id: str, private_key: str) -> Dict[str, Any]:
+        """Cancel pending transaction"""
+        ctx = self.mcp.get_context()
+        db_connection = ctx.request_context.lifespan_context["db_connection"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                if transaction_id not in self.transactions:
+                    return {"error": "Transaction not found"}
+                
+                transaction = self.transactions[transaction_id]
+                sender_address = Account.from_key(private_key).address
+                if transaction.sender != sender_address:
+                    return {"error": "Unauthorized to cancel this transaction"}
+                
+                if transaction.status != TransactionStatus.PENDING.value:
+                    return {"error": f"Cannot cancel transaction with status: {transaction.status}"}
+                
+                w3_connections = ctx.request_context.lifespan_context["web3_connections"]
+                if transaction.source_tx_hash:
+                    w3 = w3_connections.get(transaction.source_chain)
+                    if w3:
+                        try:
+                            tx = w3.eth.get_transaction(transaction.source_tx_hash)
+                            if tx["blockNumber"]:
+                                return {"error": "Transaction already confirmed on-chain, cannot cancel"}
+                        except TransactionNotFound:
+                            pass
+                
+                transaction.status = TransactionStatus.CANCELLED.value
+                transaction.completed_at = datetime.now().isoformat()
+                self._save_transaction(transaction, db_connection)
+                
+                return {
+                    "success": True,
+                    "transaction_id": transaction_id,
+                    "status": "cancelled",
+                    "cancelled_at": transaction.completed_at
+                }
+            
+            except Exception as e:
+                logger.error(f"Error cancelling transaction: {e}")
+                return {"error": str(e)}
+    
+    
+    async def _get_bridge_analytics(self, time_range: str = "24h", bridge_contract: Optional[str] = None,
+                                  metric_type: str = "volume") -> Dict[str, Any]:
+        """Get bridge analytics"""
+        ctx = self.mcp.get_context()
+        db_connection = ctx.request_context.lifespan_context["db_connection"]
+        async with aiohttp.ClientSession() as session:
+            try:
+                now = datetime.now()
+                time_deltas = {
+                    "24h": timedelta(hours=24),
+                    "7d": timedelta(days=7),
+                    "30d": timedelta(days=30),
+                    "90d": timedelta(days=90)
+                }
+                start_time = now - time_deltas[time_range]
+                
+                cursor = db_connection.cursor()
+                query = "SELECT * FROM transactions WHERE created_at >= ?"
+                params = [start_time.isoformat()]
+                if bridge_contract:
+                    query += " AND bridge_contract = ?"
+                    params.append(bridge_contract)
+                
+                cursor.execute(query, params)
+                transactions = [BridgeTransaction(**dict(zip([c[0] for c in cursor.description], row))) for row in cursor.fetchall()]
+                
+                if metric_type == "volume":
+                    analytics = self._calculate_volume_analytics(transactions)
+                elif metric_type == "transactions":
+                    analytics = self._calculate_transaction_analytics(transactions)
+                elif metric_type == "fees":
+                    analytics = self._calculate_fee_analytics(transactions)
+                elif metric_type == "success_rate":
+                    analytics = self._calculate_success_rate_analytics(transactions)
+                else:
+                    return {"error": "Invalid metric type"}
+                
+                return {
+                    "time_range": time_range,
+                    "bridge_contract": bridge_contract,
+                    "metric_type": metric_type,
+                    "period": {
+                        "start": start_time.isoformat(),
+                        "end": now.isoformat()
+                    },
+                    "analytics": analytics
+                }
+            
+            except Exception as e:
+                logger.error(f"Error getting bridge analytics: {e}")
+                return {"error": str(e)}
+    
+    async def _optimize_bridge_route(self, source_chain: str, destination_chain: str,
+                                   asset: str, amount: str, 
+                                   optimization_goal: str = "lowest_cost") -> Dict[str, Any]:
+        """Optimize bridge route"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                routes = await self._find_all_routes(source_chain, destination_chain, asset, amount)
+                if not routes:
+                    return {"error": "No routes available for this transfer"}
+                
+                if optimization_goal == "lowest_cost":
+                    optimal_route = min(routes, key=lambda r: float(r["total_cost"]))
+                elif optimization_goal == "fastest_time":
+                    optimal_route = min(routes, key=lambda r: r["estimated_time_seconds"])
+                elif optimization_goal == "best_route":
+                    optimal_route = min(routes, key=lambda r: 
+                        float(r["total_cost"]) * 0.6 + r["estimated_time_seconds"] / 3600 * 0.4)
+                else:
+                    return {"error": "Invalid optimization goal"}
+                
+                return {
+                    "optimization_goal": optimization_goal,
+                    "optimal_route": optimal_route,
+                    "alternative_routes": [r for r in routes if r != optimal_route][:3],
+                    "route_comparison": {
+                        "total_routes_found": len(routes),
+                        "cost_range": {
+                            "min": min(float(r["total_cost"]) for r in routes),
+                            "max": max(float(r["total_cost"]) for r in routes)
+                        },
+                        "time_range": {
+                            "min": min(r["estimated_time_seconds"] for r in routes),
+                            "max": max(r["estimated_time_seconds"] for r in routes)
+                        }
+                    }
+                }
+            
+            except Exception as e:
+                logger.error(f"Error optimizing bridge route: {e}")
+                return {"error": str(e)}
+    
+    async def _get_contract_abi(self, bridge_name: str, chain: str, abi_cache: TTLCache) -> List:
+        """Fetch contract ABI from Etherscan"""
+        cache_key = f"{bridge_name}_{chain}"
+        if cache_key in abi_cache:
+            return abi_cache[cache_key]
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                url = SUPPORTED_CHAINS[chain]["explorer"]
+                params = {
+                    "module": "contract",
+                    "action": "getabi",
+                    "address": BRIDGE_CONTRACTS[bridge_name][f"{chain}_address"],
+                    "apikey": ETHERSCAN_API_KEY
+                }
+                async with session.get(url, params=params) as response:
+                    data = await response.json()
+                    if data["status"] == "1":
+                        abi = json.loads(data["result"])
+                        abi_cache[cache_key] = abi
+                        return abi
+                    else:
+                        raise ValueError(f"Failed to fetch ABI: {data['message']}")
+            except Exception as e:
+                logger.error(f"Error fetching ABI for {bridge_name} on {chain}: {e}")
+                return BRIDGE_CONTRACTS[bridge_name]["abi"]
+    
+    async def _get_cached_gas_price(self, chain: str, w3: Web3, priority: str, gas_price_cache: TTLCache) -> int:
+        """Get cached gas price"""
+        cache_key = f"{chain}_{priority}"
+        if cache_key in gas_price_cache:
+            return gas_price_cache[cache_key]
+        
+        gas_price = w3.eth.gas_price
+        multiplier = {"low": 0.8, "medium": 1.0, "high": 1.2}[priority]
+        adjusted_gas_price = int(gas_price * multiplier)
+        gas_price_cache[cache_key] = adjusted_gas_price
+        return adjusted_gas_price
+    
+    async def _fetch_etherscan_history(self, address: str, chain: str, limit: int) -> List[Dict]:
+        """Fetch transaction history from Etherscan"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                url = SUPPORTED_CHAINS[chain]["explorer"]
+                params = {
+                    "module": "account",
+                    "action": "txlist",
+                    "address": address,
+                    "startblock": 0,
+                    "endblock": 99999999,
+                    "sort": "desc",
+                    "apikey": ETHERSCAN_API_KEY
+                }
+                async with session.get(url, params=params) as response:
+                    data = await response.json()
+                    if data["status"] == "1":
+                        return data["result"][:limit]
+                    return []
+            except Exception as e:
+                logger.error(f"Error fetching Etherscan history: {e}")
+                return []
+    
+    def _save_transaction(self, transaction: BridgeTransaction, db_connection: sqlite3.Connection):
+        """Save transaction to database"""
+        try:
+            cursor = db_connection.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO transactions (
+                    id, source_chain, destination_chain, asset, amount, sender, recipient,
+                    status, source_tx_hash, destination_tx_hash, created_at, completed_at,
+                    estimated_completion, fees, bridge_contract, signature
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                transaction.id, transaction.source_chain, transaction.destination_chain,
+                transaction.asset, transaction.amount, transaction.sender, transaction.recipient,
+                transaction.status, transaction.source_tx_hash, transaction.destination_tx_hash,
+                transaction.created_at, transaction.completed_at,
+                transaction.estimated_completion,
+                json.dumps(transaction.fees.dict() if transaction.fees else None),
+                transaction.bridge_contract, transaction.signature
+            ))
+            db_connection.commit()
+            self.transactions[transaction.id] = transaction
+        except Exception as e:
+            logger.error(f"Error saving transaction: {e}")
+    
+    def _generate_hmac_signature(self, tx_id: str, source_chain: str, destination_chain: str,
+                               amount: str, recipient: str) -> str:
+        """Generate HMAC signature"""
+        message = f"{tx_id}:{source_chain}:{destination_chain}:{amount}:{recipient}"
+        return hmac.new(
+            HMAC_SECRET.encode(), message.encode(), hashlib.sha256
+        ).hexdigest()
