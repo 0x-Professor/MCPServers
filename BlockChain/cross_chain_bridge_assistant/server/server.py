@@ -43,7 +43,8 @@ from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 import sqlite3
 from cachetools import TTLCache
-from web3.middleware import construct_result_generator_middleware
+#from web3.middleware import construct_result_generator_middleware
+#from web3.middleware import extra_data_toPOA
 
 load_dotenv()
 INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "7464fe4568974a00b5cf20e94ebc4833")
@@ -1144,7 +1145,7 @@ class CrossChainBridgeServer:
                     id, source_chain, destination_chain, asset, amount, sender, recipient,
                     status, source_tx_hash, destination_tx_hash, created_at, completed_at,
                     estimated_completion, fees, bridge_contract, signature
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 transaction.id, transaction.source_chain, transaction.destination_chain,
                 transaction.asset, transaction.amount, transaction.sender, transaction.recipient,
@@ -1604,7 +1605,15 @@ Optimize bridge route.
 
 server = CrossChainBridgeServer().mcp
 
-#if __name__ == "__main__":
-    #server.run(transport="streamable-http") 
+# Example: Insert a test transaction into the database (uncomment to use)
+# conn = sqlite3.connect("server/bridge.db")
+# cursor = conn.cursor()
+# cursor.execute(
+#     "INSERT INTO transactions (id, source_chain, destination_chain, asset, amount, sender, recipient, status, created_at) "
+#     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+#     ("test1", "ethereum", "polygon", "ETH", "1.0", "0x123...", "0x456...", "confirmed", "2025-07-15T16:00:00")
+# )
+# conn.commit()
+# conn.close()
 #uncomment if you want to run it through streamable http 
 #otherwise for locally testing you can remain it commented and run the server through MCP CLI using MCP inspector client 
