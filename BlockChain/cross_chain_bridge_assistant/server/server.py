@@ -43,13 +43,15 @@ from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 import sqlite3
 from cachetools import TTLCache
+from web3.middleware import construct_result_generator_middleware
 
 load_dotenv()
 INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "7464fe4568974a00b5cf20e94ebc4833")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ")
 HMAC_SECRET = os.getenv("HMAC_SECRET", "your-secret-key")
 AUTH_ISSUER_URL = os.getenv("AUTH_ISSUER_URL", "https://auth.example.com")
-AUTH_SERVER_URL = os.getenv("AUTH_SERVER_URL", "http://localhost:3001")
+AUTH_SERVER_URL = os.getenv("AUTH_SERVER_URL", "http://localhost:6277")
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "vH5jh4T1PWnfVIxV7su69")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -59,7 +61,7 @@ SUPPORTED_CHAINS = {
     "ethereum": {
         "chain_id": 1,
         "name": "Ethereum Mainnet",
-        "rpc_url": f"https://mainnet.infura.io/v3/{INFURA_PROJECT_ID}",
+        "rpc_url": f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
         "explorer": "https://api.etherscan.io/api",
         "native_token": "ETH",
         "decimals": 18
@@ -67,7 +69,7 @@ SUPPORTED_CHAINS = {
     "polygon": {
         "chain_id": 137,
         "name": "Polygon",
-        "rpc_url": "https://polygon-rpc.com",
+        "rpc_url": f"https://polygon-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
         "explorer": "https://api.polygonscan.com/api",
         "native_token": "MATIC",
         "decimals": 18
@@ -75,7 +77,7 @@ SUPPORTED_CHAINS = {
     "arbitrum": {
         "chain_id": 42161,
         "name": "Arbitrum One",
-        "rpc_url": "https://arb1.arbitrum.io/rpc",
+        "rpc_url": f"https://arb-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
         "explorer": "https://api.arbiscan.io/api",
         "native_token": "ETH",
         "decimals": 18
@@ -83,7 +85,7 @@ SUPPORTED_CHAINS = {
     "optimism": {
         "chain_id": 10,
         "name": "Optimism",
-        "rpc_url": "https://mainnet.optimism.io",
+        "rpc_url": f"https://opt-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
         "explorer": "https://api-optimistic.etherscan.io/api",
         "native_token": "ETH",
         "decimals": 18
