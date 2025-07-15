@@ -45,7 +45,8 @@ A comprehensive MCP (Multi-Chain Protocol) server for cross-chain asset transfer
 
 1. **Clone the Repository** (if applicable):
    ```bash
-   git clone https://github.com/your-repo/cross_chain_bridge_assistant.git
+   git clone https://github.com/0x-Professor/MCPServers.git
+   cd BlockChain
    cd cross_chain_bridge_assistant
    ```
 
