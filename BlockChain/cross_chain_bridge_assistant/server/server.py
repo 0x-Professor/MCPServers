@@ -47,12 +47,12 @@ from cachetools import TTLCache
 #from web3.middleware import extra_data_toPOA
 
 load_dotenv()
-INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "7464fe4568974a00b5cf20e94ebc4833")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ")
+INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "your api key")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "your api key")
 HMAC_SECRET = os.getenv("HMAC_SECRET", "your-secret-key")
 AUTH_ISSUER_URL = os.getenv("AUTH_ISSUER_URL", "https://auth.example.com")
 AUTH_SERVER_URL = os.getenv("AUTH_SERVER_URL", "http://localhost:6277")
-ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "vH5jh4T1PWnfVIxV7su69")
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "your api key")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
