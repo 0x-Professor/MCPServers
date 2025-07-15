@@ -416,4 +416,25 @@ class CrossChainBridgeServer:
             return await self._optimize_bridge_route(source_chain, destination_chain, asset, amount, optimization_goal)
         
         
-        
+        @self.mcp.completion()
+        async def handle_completion(
+            ref: ResourceTemplateReference,
+            argument: CompletionArgument,
+            context: Optional[CompletionContext]
+        ) -> Optional[Completion]:
+            """Provide completion suggestions"""
+            if ref.uri == "bridge://chains/{chain}":
+                if argument.name == "chain":
+                    chains = list(SUPPORTED_CHAINS.keys())
+                    filtered = [c for c in chains if c.startswith(argument.value)]
+                    return Completion(values=filtered)
+            elif ref.uri == "bridge://assets/{asset}":
+                if argument.name == "asset":
+                    assets = await self._get_supported_assets(context.arguments.get("source_chain") if context else None,
+                                                            context.arguments.get("destination_chain") if context else None)
+                    symbols = [a["symbol"] for a in assets["assets"]]
+                    filtered = [s for s in symbols if s.startswith(argument.value)]
+                    return Completion(values=filtered)
+            return None
+    
+     
