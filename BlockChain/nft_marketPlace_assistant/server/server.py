@@ -372,3 +372,43 @@ class NFTMarketplaceServer:
         """)
         conn.commit()
         return conn
+
+    @asynccontextmanager
+    async def _app_lifespan(self, server: FastMCP) -> AsyncIterator[AppContext]:
+        """Manage server lifecycle"""
+        web3_connections = {}
+        db_connection = self._initialize_db()
+        abi_cache = TTLCache(maxsize=100, ttl=3600)
+        gas_price_cache = TTLCache(maxsize=50, ttl=300)
+        try:
+            for chain_name, chain_config in SUPPORTED_CHAINS.items():
+                max_retries = 5
+                for attempt in range(max_retries):
+                    try:
+                        logger.info(f"Attempting to connect to {chain_name} at {chain_config['rpc_url']}")
+                        w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
+                        if w3.is_connected():
+                            web3_connections[chain_name] = w3
+                            logger.info(f"Connected to {chain_name} network on attempt {attempt + 1}")
+                            break
+                        else:
+                            logger.warning(f"Failed to connect to {chain_name} network on attempt {attempt + 1}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(5)
+                    except Exception as e:
+                        logger.error(f"Error connecting to {chain_name} on attempt {attempt + 1}: {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(5)
+                else:
+                    logger.error(f"Failed to connect to {chain_name} after {max_retries} attempts")
+
+            yield AppContext(
+                web3_connections=web3_connections,
+                db_connection=db_connection,
+                abi_cache=abi_cache,
+                gas_price_cache=gas_price_cache
+            )
+        finally:
+            db_connection.close()
+            logger.info("Server shutdown: Closed database connection")
+
