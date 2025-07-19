@@ -34,3 +34,43 @@ try:
 except shodan.APIError as e:
     logger.error(f"Shodan API initialization failed: {str(e)}")
     shodan_api = None
+
+# Initialize SQLite database
+def init_db():
+    conn = sqlite3.connect("server/cybersecurity.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scans (
+            id TEXT PRIMARY KEY,
+            target TEXT,
+            scan_type TEXT,
+            arguments TEXT,
+            results TEXT,
+            created_at TIMESTAMP,
+            chain TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scans_target ON scans(target)")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS vulnerabilities (
+            target TEXT,
+            port INTEGER,
+            service TEXT,
+            vulnerability TEXT,
+            cve_id TEXT,
+            shodan_data TEXT,
+            created_at TIMESTAMP,
+            PRIMARY KEY (target, port)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            ip TEXT PRIMARY KEY,
+            count INTEGER,
+            last_reset TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
