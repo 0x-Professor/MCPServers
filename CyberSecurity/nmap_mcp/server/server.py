@@ -355,3 +355,51 @@ async def analyze_nmap_results(params: ScanInput, ctx: Context) -> List[TextCont
         logger.error(f"Analysis error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
+@mcp.tool(title="Run NSE Vulnerability Scan")
+async def run_nse_vulnerability_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Run an Nmap NSE vulnerability scan with specified scripts."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = "-sV"  # NSE requires version detection
+        nse_scripts = params.nse_scripts or "vulners,http-vuln-cve2017-5638"
+        
+        arguments = f"{scan_type} --script {nse_scripts}"
+        logger.info(f"Running NSE vulnerability scan: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            if nm[host].state() == "up":
+                host_info = f"Host: {host} ({nm[host].state()})\n"
+                ports_info = []
+                for proto in nm[host].all_protocols():
+                    ports = nm[host][proto].keys()
+                    for port in sorted(ports):
+                        state = nm[host][proto][port]["state"]
+                        service = nm[host][proto][port].get("name", "unknown")
+                        version = nm[host][proto][port].get("product", "") + " " + nm[host][proto][port].get("version", "")
+                        script_output = nm[host][proto][port].get("script", {})
+                        script_results = "\n".join(f"Script {k}: {v}" for k, v in script_output.items()) if script_output else "No vulnerabilities found"
+                        ports_info.append(f"Port {port}/{proto}: {state} ({service} {version})\nVulnerabilities:\n{script_results}")
+                if ports_info:
+                    host_info += "\n".join(ports_info)
+                else:
+                    host_info += "No open ports found."
+                results.append(host_info)
+        
+        scan_id = f"nse_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"NSE scan error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
