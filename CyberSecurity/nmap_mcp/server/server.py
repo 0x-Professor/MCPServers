@@ -74,3 +74,25 @@ def init_db():
     conn.close()
 
 init_db()
+
+# Supported scan types
+ALLOWED_SCAN_TYPES = {
+    "-sS": "TCP SYN scan",
+    "-sT": "TCP Connect scan",
+    "-sU": "UDP scan",
+    "-sF": "TCP FIN scan",
+    "-sN": "TCP NULL scan",
+    "-sX": "TCP Xmas scan",
+    "-sA": "TCP ACK scan",
+    "-sW": "TCP Window scan",
+    "-sM": "TCP Maimon scan",
+    "-sV": "Version detection",
+    "-O": "OS detection",
+    "-PE": "Ping scan (ICMP echo)",
+    "-PP": "Ping scan (timestamp)"
+}
+# Allowed NSE scripts
+ALLOWED_NSE_SCRIPTS = [
+    "vulners", "http-enum", "smb-vuln-ms17-010", "ssl-cert", "http-title", "dns-brute",
+    "http-vuln-cve2017-5638", "ftp-anon", "mysql-vuln-cve2012-2122"
+]
