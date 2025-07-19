@@ -68,3 +68,162 @@ SUPPORTED_CHAINS = {
     }
 }
 
+# Marketplace contract addresses 
+MARKETPLACE_CONTRACTS = {
+    "opensea": {
+        "ethereum": "0x7f268357A8c2552623316e2562D90e642bB538E5",  # OpenSea Wyvern Exchange V2
+        "abi": [
+            {
+                "inputs": [],
+                "payable": False,
+                "stateMutability": "nonpayable",
+                "type": "constructor"
+            },
+            {
+                "anonymous": False,
+                "inputs": [
+                    {
+                        "indexed": True,
+                        "name": "hash",
+                        "type": "bytes32"
+                    },
+                    {
+                        "indexed": True,
+                        "name": "exchange",
+                        "type": "address"
+                    },
+                    {
+                        "indexed": True,
+                        "name": "maker",
+                        "type": "address"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "taker",
+                        "type": "address"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "makerRelayerFee",
+                        "type": "uint256"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "takerRelayerFee",
+                        "type": "uint256"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "makerProtocolFee",
+                        "type": "uint256"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "takerProtocolFee",
+                        "type": "uint256"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "feeRecipient",
+                        "type": "address"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "feeMethod",
+                        "type": "uint8"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "side",
+                        "type": "uint8"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "saleKind",
+                        "type": "uint8"
+                    },
+                    {
+                        "indexed": False,
+                        "name": "target",
+                        "type": "address"
+                    }
+                ],
+                "name": "OrderApprovedPartOne",
+                "type": "event"
+            }
+        ]
+    },
+    "rarible": {
+        "ethereum": "0x9757F2d2b135150BBeb65308D4a91804107cd8D6",  # Rarible Exchange V2
+        "abi": [
+            {
+                "inputs": [
+                    {
+                        "internalType": "contract IERC20Upgradeable",
+                        "name": "_token",
+                        "type": "address"
+                    }
+                ],
+                "name": "deposit",
+                "outputs": [],
+                "stateMutability": "payable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {
+                        "internalType": "contract IERC20Upgradeable",
+                        "name": "_token",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "amount",
+                        "type": "uint256"
+                    }
+                ],
+                "name": "withdraw",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "anonymous": False,
+                "inputs": [
+                    {
+                        "indexed": True,
+                        "internalType": "bytes32",
+                        "name": "orderHash",
+                        "type": "bytes32"
+                    },
+                    {
+                        "indexed": True,
+                        "internalType": "address",
+                        "name": "maker",
+                        "type": "address"
+                    },
+                    {
+                        "indexed": False,
+                        "internalType": "address",
+                        "name": "taker",
+                        "type": "address"
+                    },
+                    {
+                        "indexed": False,
+                        "internalType": "uint256",
+                        "name": "makerValue",
+                        "type": "uint256"
+                    },
+                    {
+                        "indexed": False,
+                        "internalType": "uint256",
+                        "name": "takerValue",
+                        "type": "uint256"
+                    }
+                ],
+                "name": "Match",
+                "type": "event"
+            }
+        ]
+    }
+}
