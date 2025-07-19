@@ -309,3 +309,66 @@ class SimpleTokenVerifier(TokenVerifier):
             except Exception as e:
                 logger.error(f"Token verification failed: {str(e)}")
                 raise ValueError(f"Token verification failed: {str(e)}")
+
+# Server Context
+@dataclass
+class AppContext:
+    web3_connections: Dict[str, Web3]
+    db_connection: sqlite3.Connection
+    abi_cache: TTLCache
+    gas_price_cache: TTLCache
+
+class NFTMarketplaceServer:
+    """MCP server for NFT marketplace operations"""
+
+    def __init__(self):
+        self.mcp = FastMCP(
+            name="NFTMarketplace",
+            stateless_http=True,
+            dependencies=["web3", "aiohttp", "python-dotenv", "cachetools", "pydantic"],
+            auth=AuthSettings(
+                issuer_url=AUTH_ISSUER_URL,
+                resource_server_url=AUTH_SERVER_URL,
+                required_scopes=["nft:read", "nft:write"],
+            ),
+            token_verifier=SimpleTokenVerifier(),
+            lifespan=self._app_lifespan
+        )
+        self.transactions: Dict[str, Union[BidTransaction, MintTransaction, SaleListing]] = {}
+        self._setup_handlers()
+
+    def _initialize_db(self) -> sqlite3.Connection:
+        """Initialize SQLite database"""
+        db_path = os.path.join(os.path.dirname(__file__), "nft_marketplace.db")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id TEXT PRIMARY KEY,
+                type TEXT,
+                contract_address TEXT,
+                token_id TEXT,
+                amount TEXT,
+                bidder TEXT,
+                minter TEXT,
+                metadata TEXT,
+                status TEXT,
+                tx_hash TEXT,
+                created_at TEXT,
+                marketplace TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS listings (
+                id TEXT PRIMARY KEY,
+                contract_address TEXT,
+                token_id TEXT,
+                price TEXT,
+                seller TEXT,
+                status TEXT,
+                created_at TEXT,
+                marketplace TEXT
+            )
+        """)
+        conn.commit()
+        return conn
