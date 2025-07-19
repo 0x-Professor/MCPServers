@@ -11,9 +11,9 @@ import logging
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, AsyncIterator
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+#from collections.abc import AsyncIterator
 from enum import Enum
 from dataclasses import dataclass
 import hashlib
