@@ -506,3 +506,50 @@ async def enumerate_services(params: ScanInput, ctx: Context) -> List[TextConten
     except Exception as e:
         logger.error(f"Service enumeration error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+@mcp.tool(title="Analyze Firewall")
+async def analyze_firewall(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Analyze firewall/IDS configurations using Nmap techniques."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = "-sA"  # Use ACK scan for firewall analysis
+        extra_args = params.extra_args or "--badsum"
+        
+        arguments = f"{scan_type} {extra_args}".strip()
+        logger.info(f"Running firewall analysis: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            host_info = f"Host: {host} ({nm[host].state()})\n"
+            firewall_detected = False
+            details = []
+            for proto in nm[host].all_protocols():
+                for port in nm[host][proto].keys():
+                    state = nm[host][proto][port]["state"]
+                    if state == "filtered":
+                        firewall_detected = True
+                        details.append(f"Port {port}/{proto}: Filtered, indicating a firewall or IDS.")
+                    elif state in ["open", "closed"]:
+                        details.append(f"Port {port}/{proto}: {state}, suggesting no strict firewall.")
+            if "--badsum" in arguments and nm[host].state() == "up":
+                details.append("Host responded to bad checksum packets, suggesting relaxed firewall rules.")
+            host_info += "\n".join(details) or "No firewall/IDS indicators found."
+            results.append(host_info)
+        
+        scan_id = f"firewall_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"Firewall analysis error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
