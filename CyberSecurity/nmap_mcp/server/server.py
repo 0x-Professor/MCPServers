@@ -403,3 +403,56 @@ async def run_nse_vulnerability_scan(params: ScanInput, ctx: Context) -> List[Te
     except Exception as e:
         logger.error(f"NSE scan error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+@mcp.tool(title="Run OS Detection")
+async def run_os_detection(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Run Nmap OS detection to identify operating system and version."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = "-O"
+        extra_args = params.extra_args
+        
+        arguments = f"{scan_type} {extra_args}".strip()
+        logger.info(f"Running OS detection: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            if nm[host].state() == "up":
+                host_info = f"Host: {host} ({nm[host].state()})\n"
+                os_info = nm[host].get("osmatch", [])
+                if os_info:
+                    for os in os_info:
+                        os_name = os.get("name", "Unknown")
+                        accuracy = float(os.get("accuracy", 0))
+                        os_details = f"OS: {os_name} (Accuracy: {accuracy}%)"
+                        host_info += os_details + "\n"
+                        conn = sqlite3.connect("server/cybersecurity.db")
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO vulnerabilities (target, port, service, vulnerability, cve_id, shodan_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (host, 0, "os", os_details, None, None, datetime.utcnow())
+                        )
+                        conn.commit()
+                        conn.close()
+                else:
+                    host_info += "No OS information found."
+                results.append(host_info)
+        
+        scan_id = f"os_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"OS detection error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
+
