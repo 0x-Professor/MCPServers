@@ -34,7 +34,7 @@ except shodan.APIError as e:
 
 # Initialize SQLite database
 def init_db():
-    conn = sqlite3.connect("cybersecurity.db")
+    conn = sqlite3.connect("server/cybersecurity.db")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scans (
