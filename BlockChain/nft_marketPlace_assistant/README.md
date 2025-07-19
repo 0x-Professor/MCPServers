@@ -145,15 +145,7 @@ Tools are exposed as MCP endpoints, accessible via HTTP or the MCP Inspector UI.
    OPENSEA_API_KEY=your_opensea_api_key
    ```
 
-   Example:
-
-   ```env
-   INFURA_PROJECT_ID=7464fe4568974a00b5cf20e94ebc4833
-   ETHERSCAN_API_KEY=3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ
-   ALCHEMY_API_KEY=vH5jh4T1PWnfVIxV7su69
-   HMAC_SECRET=wfnwvnw23452tdvwt454354fwefw4t3
-   OPENSEA_API_KEY=your_opensea_api_key
-   ```
+  
 
    Obtain API keys from:
 
@@ -216,12 +208,6 @@ from server import mcp  # Import your MCP server
 
 app = FastAPI()
 app.mount("/nft", mcp.streamable_http_app())
-```
-
-Run with:
-
-```bash
-uv run uvicorn main:app --port 3001
 ```
 
 ## Available Tools
@@ -315,12 +301,12 @@ The server exposes the following MCP tools, accessible via HTTP endpoints or the
 
 ## API Examples
 
-Use `curl` or tools like Postman to interact with the server. Replace placeholders (e.g., `0x...`, `bid_...`) with valid values. All endpoints are POST requests to `http://localhost:3001/nft/<tool_name>`.
+Use `curl` or tools like Postman to interact with the server. Replace placeholders (e.g., `0x...`, `bid_...`) with valid values. All endpoints are POST requests to `http://localhost:6277/nft/<tool_name>`.
 
 - **Get NFT Metadata**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/get_nft_metadata \
+  curl -X POST http://localhost:6277/nft/get_nft_metadata \
     -H "Content-Type: application/json" \
     -d '{"contract_address": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "token_id": "1", "chain": "ethereum"}'
   ```
@@ -328,7 +314,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Place Bid**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/place_bid \
+  curl -X POST http://localhost:6277/nft/place_bid \
     -H "Content-Type: application/json" \
     -d '{"collection": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "token_id": "1", "amount": "0.5", "bidder": "0xYourAddress", "marketplace": "opensea", "chain": "ethereum"}'
   ```
@@ -336,7 +322,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Mint NFT**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/mint_nft \
+  curl -X POST http://localhost:6277/nft/mint_nft \
     -H "Content-Type: application/json" \
     -d '{"contract_address": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "metadata": {"name": "Test NFT", "description": "A test NFT", "image": "https://example.com/image.png"}, "minter": "0xYourAddress", "chain": "ethereum"}'
   ```
@@ -344,7 +330,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **List NFT for Sale**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/list_nft_for_sale \
+  curl -X POST http://localhost:6277/nft/list_nft_for_sale \
     -H "Content-Type: application/json" \
     -d '{"contract_address": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "token_id": "1", "price": "1.0", "seller": "0xYourAddress", "marketplace": "opensea", "chain": "ethereum"}'
   ```
@@ -352,7 +338,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Get Marketplace Trends**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/get_marketplace_trends \
+  curl -X POST http://localhost:6277/nft/get_marketplace_trends \
     -H "Content-Type: application/json" \
     -d '{"collection": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "chain": "ethereum"}'
   ```
@@ -360,7 +346,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Monitor Transaction**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/monitor_nft_transaction \
+  curl -X POST http://localhost:6277/nft/monitor_nft_transaction \
     -H "Content-Type: application/json" \
     -d '{"tx_id": "bid_...", "chain": "ethereum"}'
   ```
@@ -368,7 +354,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Get NFT Ownership**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/get_nft_ownership \
+  curl -X POST http://localhost:6277/nft/get_nft_ownership \
     -H "Content-Type: application/json" \
     -d '{"contract_address": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "token_id": "1", "chain": "ethereum"}'
   ```
@@ -376,7 +362,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Cancel Bid**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/cancel_bid \
+  curl -X POST http://localhost:6277/nft/cancel_bid \
     -H "Content-Type: application/json" \
     -d '{"tx_id": "bid_...", "bidder": "0xYourAddress", "chain": "ethereum"}'
   ```
@@ -384,7 +370,7 @@ Use `curl` or tools like Postman to interact with the server. Replace placeholde
 - **Get Collection Stats**:
 
   ```bash
-  curl -X POST http://localhost:3001/nft/get_collection_stats \
+  curl -X POST http://localhost:6277/nft/get_collection_stats \
     -H "Content-Type: application/json" \
     -d '{"collection": "0x06012c8cf97BEaD5deAe237070F9587f8E7A266d", "chain": "ethereum"}'
   ```
