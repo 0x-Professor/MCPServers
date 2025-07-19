@@ -513,3 +513,212 @@ class NFTMarketplaceServer:
                 CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
             ]
         )
+    
+    async def get_nft_metadata(self, context: AppContext, arguments: Dict[str, Any]) -> Completion:
+        """Retrieve metadata for an NFT"""
+        contract_address = arguments.get("contract_address")
+        token_id = arguments.get("token_id")
+        chain = arguments.get("chain", "ethereum")
+
+        if not is_address(contract_address):
+            return Completion(result={"error": "Invalid contract address"}, status="error")
+        if not token_id.isdigit():
+            return Completion(result={"error": "Invalid token ID"}, status="error")
+        if chain not in SUPPORTED_CHAINS:
+            return Completion(result={"error": f"Chain {chain} not supported"}, status="error")
+
+        try:
+            w3 = context.web3_connections.get(chain)
+            if not w3:
+                return Completion(result={"error": f"Chain {chain} not connected"}, status="error")
+
+            # Fetch ABI from cache or Etherscan
+            abi = context.abi_cache.get(contract_address)
+            if not abi:
+                response = requests.get(
+                    f"{SUPPORTED_CHAINS[chain]['explorer']}?module=contract&action=getabi&address={contract_address}&apikey={ETHERSCAN_API_KEY}"
+                )
+                abi = json.loads(response.json().get("result", "[]"))
+                context.abi_cache[contract_address] = abi
+
+            contract = w3.eth.contract(address=to_checksum_address(contract_address), abi=abi)
+            token_uri = contract.functions.tokenURI(int(token_id)).call()
+            
+            # Fetch metadata from token URI
+            async with aiohttp.ClientSession() as session:
+                async with session.get(token_uri) as response:
+                    metadata = await response.json()
+                    return Completion(
+                        result=NFTMetadata(
+                            contract_address=contract_address,
+                            token_id=token_id,
+                            name=metadata.get("name"),
+                            description=metadata.get("description"),
+                            image_url=metadata.get("image"),
+                            attributes=metadata.get("attributes"),
+                            chain=chain
+                        ).dict(),
+                        status="success"
+                    )
+        except Exception as e:
+            logger.error(f"Error fetching NFT metadata: {e}")
+            return Completion(result={"error": str(e)}, status="error")
+
+    async def place_bid(self, context: AppContext, arguments: Dict[str, Any]) -> Completion:
+        """Place a bid on an NFT auction"""
+        collection = arguments.get("collection")
+        token_id = arguments.get("token_id")
+        amount = arguments.get("amount")
+        bidder = arguments.get("bidder")
+        marketplace = arguments.get("marketplace", "opensea")
+        chain = arguments.get("chain", "ethereum")
+
+        if not is_address(collection) or not is_address(bidder):
+            return Completion(result={"error": "Invalid address"}, status="error")
+        if not token_id.isdigit():
+            return Completion(result={"error": "Invalid token ID"}, status="error")
+        try:
+            amount = Decimal(amount)
+            if amount <= 0:
+                raise ValueError("Bid amount must be positive")
+        except (ValueError, TypeError):
+            return Completion(result={"error": "Invalid bid amount"}, status="error")
+        if chain not in SUPPORTED_CHAINS:
+            return Completion(result={"error": f"Chain {chain} not supported"}, status="error")
+        if marketplace not in MARKETPLACE_CONTRACTS:
+            return Completion(result={"error": f"Marketplace {marketplace} not supported"}, status="error")
+
+        try:
+            w3 = context.web3_connections.get(chain)
+            if not w3:
+                return Completion(result={"error": f"Chain {chain} not connected"}, status="error")
+
+            tx_id = hashlib.sha256(f"{collection}{token_id}{bidder}{time.time()}".encode()).hexdigest()
+            # Simulate bid placement (actual implementation requires marketplace-specific contract calls)
+            # Example: OpenSea Wyvern Exchange requires creating an order
+            cursor = context.db_connection.cursor()
+            cursor.execute(
+                "INSERT INTO transactions (id, type, contract_address, token_id, amount, bidder, status, created_at, marketplace) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (tx_id, "bid", collection, token_id, str(amount), bidder, TransactionStatus.PENDING.value, datetime.now().isoformat(), marketplace)
+            )
+            context.db_connection.commit()
+
+            return Completion(
+                result=BidTransaction(
+                    id=tx_id,
+                    collection=collection,
+                    token_id=token_id,
+                    amount=str(amount),
+                    bidder=bidder,
+                    status=TransactionStatus.PENDING.value,
+                    created_at=datetime.now().isoformat(),
+                    marketplace=marketplace
+                ).dict(),
+                status="success"
+            )
+        except Exception as e:
+            logger.error(f"Error placing bid: {e}")
+            return Completion(result={"error": str(e)}, status="error")
+
+    async def mint_nft(self, context: AppContext, arguments: Dict[str, Any]) -> Completion:
+        """Mint a new NFT"""
+        contract_address = arguments.get("contract_address")
+        metadata = arguments.get("metadata")
+        minter = arguments.get("minter")
+        chain = arguments.get("chain", "ethereum")
+
+        if not is_address(contract_address) or not is_address(minter):
+            return Completion(result={"error": "Invalid address"}, status="error")
+        if not isinstance(metadata, dict):
+            return Completion(result={"error": "Invalid metadata"}, status="error")
+        if chain not in SUPPORTED_CHAINS:
+            return Completion(result={"error": f"Chain {chain} not supported"}, status="error")
+
+        try:
+            w3 = context.web3_connections.get(chain)
+            if not w3:
+                return Completion(result={"error": f"Chain {chain} not connected"}, status="error")
+
+            tx_id = hashlib.sha256(f"{contract_address}{minter}{time.time()}".encode()).hexdigest()
+            # Simulate minting (actual implementation requires contract-specific mint function)
+            cursor = context.db_connection.cursor()
+            cursor.execute(
+                "INSERT INTO transactions (id, type, contract_address, minter, metadata, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (tx_id, "mint", contract_address, minter, json.dumps(metadata), TransactionStatus.PENDING.value, datetime.now().isoformat())
+            )
+            context.db_connection.commit()
+
+            return Completion(
+                result=MintTransaction(
+                    id=tx_id,
+                    contract_address=contract_address,
+                    minter=minter,
+                    metadata=metadata,
+                    status=TransactionStatus.PENDING.value,
+                    created_at=datetime.now().isoformat()
+                ).dict(),
+                status="success"
+            )
+        except Exception as e:
+            logger.error(f"Error minting NFT: {e}")
+            return Completion(result={"error": str(e)}, status="error")
+
+    async def list_nft_for_sale(self, context: AppContext, arguments: Dict[str, Any]) -> Completion:
+        """List an NFT for sale"""
+        contract_address = arguments.get("contract_address")
+        token_id = arguments.get("token_id")
+        price = arguments.get("price")
+        seller = arguments.get("seller")
+        marketplace = arguments.get("marketplace", "opensea")
+        chain = arguments.get("chain", "ethereum")
+
+        if not is_address(contract_address) or not is_address(seller):
+            return Completion(result={"error": "Invalid address"}, status="error")
+        if not token_id.isdigit():
+            return Completion(result={"error": "Invalid token ID"}, status="error")
+        try:
+            price = Decimal(price)
+            if price <= 0:
+                raise ValueError("Price must be positive")
+        except (ValueError, TypeError):
+            return Completion(result={"error": "Invalid price"}, status="error")
+        if chain not in SUPPORTED_CHAINS:
+            return Completion(result={"error": f"Chain {chain} not supported"}, status="error")
+        if marketplace not in MARKETPLACE_CONTRACTS:
+            return Completion(result={"error": f"Marketplace {marketplace} not supported"}, status="error")
+
+        try:
+            w3 = context.web3_connections.get(chain)
+            if not w3:
+                return Completion(result={"error": f"Chain {chain} not connected"}, status="error")
+
+            listing_id = hashlib.sha256(f"{contract_address}{token_id}{seller}{time.time()}".encode()).hexdigest()
+            # Simulate listing (actual implementation requires marketplace-specific contract calls)
+            cursor = context.db_connection.cursor()
+            cursor.execute(
+                "INSERT INTO listings (id, contract_address, token_id, price, seller, status, created_at, marketplace) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (listing_id, contract_address, token_id, str(price), seller, "active", datetime.now().isoformat(), marketplace)
+            )
+            context.db_connection.commit()
+
+            return Completion(
+                result=SaleListing(
+                    id=listing_id,
+                    contract_address=contract_address,
+                    token_id=token_id,
+                    price=str(price),
+                    seller=seller,
+                    status="active",
+                    created_at=datetime.now().isoformat(),
+                    marketplace=marketplace
+                ).dict(),
+                status="success"
+            )
+        except Exception as e:
+            logger.error(f"Error listing NFT for sale: {e}")
+            return Completion(result={"error": str(e)}, status="error")
+
+    
