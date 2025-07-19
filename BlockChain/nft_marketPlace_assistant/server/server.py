@@ -338,40 +338,74 @@ class NFTMarketplaceServer:
         self._setup_handlers()
 
     def _initialize_db(self) -> sqlite3.Connection:
-        """Initialize SQLite database"""
-        db_path = os.path.join(os.path.dirname(__file__), "nft_marketplace.db")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
+        """Initialize SQLite database with proper schema and error handling"""
+        try:
+            db_path = os.path.join(os.path.dirname(__file__), "nft_marketplace.db")
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # Enable foreign key support
+            cursor.execute("PRAGMA foreign_keys = ON;")
+        
+            # Create transactions table with proper schema
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id TEXT PRIMARY KEY,
-                type TEXT,
-                contract_address TEXT,
+                type TEXT NOT NULL,
+                contract_address TEXT NOT NULL,
                 token_id TEXT,
                 amount TEXT,
                 bidder TEXT,
                 minter TEXT,
+                collection TEXT,
                 metadata TEXT,
-                status TEXT,
-                tx_hash TEXT,
-                created_at TEXT,
-                marketplace TEXT
+                status TEXT NOT NULL,
+                tx_hash TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                marketplace TEXT,
+                chain TEXT,
+                error_message TEXT,
+                updated_at TEXT NOT NULL
             )
-        """)
-        cursor.execute("""
+            """)
+        
+        # Create listings table with proper schema
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS listings (
                 id TEXT PRIMARY KEY,
-                contract_address TEXT,
-                token_id TEXT,
-                price TEXT,
-                seller TEXT,
-                status TEXT,
-                created_at TEXT,
-                marketplace TEXT
+                contract_address TEXT NOT NULL,
+                token_id TEXT NOT NULL,
+                collection TEXT,
+                price TEXT NOT NULL,
+                seller TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT,
+                marketplace TEXT NOT NULL,
+                chain TEXT NOT NULL,
+                raw_data TEXT,
+                FOREIGN KEY (contract_address, token_id) 
+                REFERENCES nfts(contract_address, token_id) ON DELETE CASCADE
             )
-        """)
-        conn.commit()
-        return conn
+            """)
+        
+        # Create indexes for better query performance
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_transactions_contract_token 
+            ON transactions(contract_address, token_id)
+            """)
+            cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_listings_contract_token 
+            ON listings(contract_address, token_id)
+            """)
+        
+            conn.commit()
+            return conn
+        
+        except sqlite3.Error as e:
+            logger.error(f"Database initialization failed: {e}")
+            raise
 
     @asynccontextmanager
     async def _app_lifespan(self, server: FastMCP) -> AsyncIterator[AppContext]:
