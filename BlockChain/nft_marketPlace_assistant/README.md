@@ -1,16 +1,10 @@
 # NFT Marketplace Assistant MCP Server
 
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Dependencies](https://img.shields.io/badge/dependencies-up%20to%20date-green)   ![MCP](https://img.shields.io/badge/MCP-0.1.2-blue)
 
-![License](https://img.shields.io/badge/license-MIT-blue)
+A professional-grade Model Context Protocol (MCP) server for interacting with NFT marketplaces like OpenSea and Rarible. Built with Python and the MCP Python SDK, this server exposes a suite of tools for NFT operations, including metadata retrieval, bidding, minting, listing, trend analysis, ownership queries, bid cancellation, and collection statistics. It supports Ethereum and Polygon blockchains, leveraging Alchemy for blockchain interactions and OpenSea for real-time marketplace data.
 
-![Python](https://img.shields.io/badge/python-3.8%2B-blue)
-
-![Dependencies](https://img.shields.io/badge/dependencies-up%20to%20date-green)
-
-![MCP](https://img.shields.io/badge/MCP-0.1.2-blue)A professional-grade Model Context Protocol (MCP) server for interacting with NFT marketplaces like OpenSea and Rarible. Built with Python and the MCP Python SDK, this server exposes a suite of tools for NFT operations, including metadata retrieval, bidding, minting, listing, trend analysis, ownership queries, bid cancellation, and collection statistics. It supports Ethereum and Polygon blockchains, leveraging Alchemy for blockchain interactions and OpenSea for real-time marketplace data.
-
-Designed by a professional developer, this project emphasizes modularity, scalability, and robust error handling, making it suitable for integration with LLM-driven applications or direct API usage. The server uses FastMCP for protocol compliance, SQLite for data persistence, and Pydantic for strict data validation.
+This project emphasizes modularity, scalability, and robust error handling, making it suitable for integration with LLM-driven applications or direct API usage. The server uses FastMCP for protocol compliance, SQLite for data persistence, and Pydantic for strict data validation.
 
 ## Table of Contents
 
