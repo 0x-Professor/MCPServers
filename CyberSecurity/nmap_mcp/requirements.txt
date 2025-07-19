@@ -6,5 +6,5 @@ python-dotenv>=1.0.0
 cachetools>=5.3.1
 pydantic>=2.0.0
 sqlalchemy
-python-nmap
+python-libnmap>=0.7.3
 shodan

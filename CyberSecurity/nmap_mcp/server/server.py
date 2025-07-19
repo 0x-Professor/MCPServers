@@ -2,7 +2,8 @@ import os
 import asyncio
 import logging
 import sqlite3
-import nmap
+from libnmap.process import NmapProcess
+from libnmap.parser import NmapParser
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
@@ -34,7 +35,7 @@ except shodan.APIError as e:
 
 # Initialize SQLite database
 def init_db():
-    conn = sqlite3.connect("server/cybersecurity.db")
+    conn = sqlite3.connect("cybersecurity.db")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scans (
@@ -159,44 +160,99 @@ class HostDiscoveryOutput(BaseModel):
 mcp = FastMCP("CybersecurityNMAP")
 
 # Configure nmap path for different environments
-def get_nmap_scanner():
-    """Initialize nmap scanner with proper path configuration."""
+def get_nmap_path():
+    """Find the correct nmap binary path for cross-platform compatibility."""
+    import shutil
+    import subprocess
+    
     # Try different nmap paths
     nmap_paths = [
         "nmap",  # Default system PATH
         "C:\\Program Files (x86)\\Nmap\\nmap.exe",  # Common Windows install path
         "C:\\Program Files\\Nmap\\nmap.exe",  # Alternative Windows path
-        "wsl nmap",  # WSL nmap command
+        "/usr/bin/nmap",  # Linux/WSL path
+        "/usr/local/bin/nmap",  # Alternative Linux path
     ]
     
-    for nmap_path in nmap_paths:
+    # First try using shutil.which to find nmap in PATH
+    nmap_path = shutil.which("nmap")
+    if nmap_path:
         try:
-            logger.info(f"Trying nmap path: {nmap_path}")
-            nm = nmap.PortScanner(nmap_search_path=[nmap_path] if nmap_path != "nmap" else [])
             # Test if nmap works
-            nm.scan("127.0.0.1", "80", "-sn")
-            logger.info(f"Successfully configured nmap with path: {nmap_path}")
-            return nm
+            result = subprocess.run([nmap_path, "--version"], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                logger.info(f"Found working nmap at: {nmap_path}")
+                return nmap_path
         except Exception as e:
-            logger.warning(f"Failed to use nmap path {nmap_path}: {str(e)}")
+            logger.warning(f"Failed to test nmap at {nmap_path}: {str(e)}")
+    
+    # Try WSL nmap if on Windows
+    try:
+        result = subprocess.run(["wsl", "nmap", "--version"], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            logger.info("Found working nmap in WSL")
+            return "wsl nmap"
+    except Exception:
+        pass
+    
+    # Try explicit paths
+    for path in nmap_paths:
+        try:
+            if path == "nmap":
+                continue  # Already tried with shutil.which
+            result = subprocess.run([path, "--version"], 
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                logger.info(f"Found working nmap at: {path}")
+                return path
+        except Exception:
             continue
     
-    # If all paths fail, try default without path specification
+    raise Exception("Could not find nmap binary. Please ensure nmap is installed and accessible.")
+
+def run_nmap_process(target: str, arguments: str) -> str:
+    """Run nmap using libnmap's NmapProcess for better cross-platform support."""
     try:
-        nm = nmap.PortScanner()
-        logger.info("Using default nmap configuration")
-        return nm
+        nmap_path = get_nmap_path()
+        
+        # Handle WSL nmap specially
+        if nmap_path == "wsl nmap":
+            # For WSL, we need to run the command differently
+            import subprocess
+            cmd = f"wsl nmap {arguments} {target}"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                raise Exception(f"Nmap scan failed: {result.stderr}")
+            return result.stdout
+        else:
+            # Use libnmap for regular nmap installations
+            nm_proc = NmapProcess(target, arguments, nmap_path=nmap_path)
+            nm_proc.run()
+            
+            if nm_proc.rc != 0:
+                raise Exception(f"Nmap scan failed: {nm_proc.stderr}")
+            
+            return nm_proc.stdout
     except Exception as e:
-        logger.error(f"Failed to initialize nmap scanner: {str(e)}")
-        raise Exception("Could not initialize nmap scanner. Please ensure nmap is installed and accessible.")
+        logger.error(f"Nmap process error: {str(e)}")
+        raise
 
 # Lifespan management
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> Dict[str, Any]:
     logger.info("Starting CybersecurityNMAP server")
-    nm = get_nmap_scanner()
+    # Test nmap availability at startup
     try:
-        yield {"nmap": nm}
+        nmap_path = get_nmap_path()
+        logger.info(f"Nmap available at: {nmap_path}")
+    except Exception as e:
+        logger.error(f"Nmap not available: {str(e)}")
+        raise
+    
+    try:
+        yield {"nmap_available": True}
     finally:
         logger.info("Shutting down CybersecurityNMAP server")
 
@@ -223,7 +279,10 @@ async def query_shodan(target: str, port: int, service: str) -> Dict[str, Any]:
 async def run_nmap_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
     """Run an Nmap scan on a target with specified scan type and optional NSE scripts."""
     try:
-        nm = ctx.request_context.lifespan_context["nmap"]
+        # Check if nmap is available
+        if not ctx.request_context.lifespan_context.get("nmap_available"):
+            return [TextContent(type="text", text="Error: Nmap is not available")]
+        
         target = params.target
         scan_type = params.scan_type
         extra_args = params.extra_args
@@ -235,26 +294,44 @@ async def run_nmap_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
         arguments = arguments.strip()
         
         logger.info(f"Running Nmap scan: {arguments} on {target}")
-        nm.scan(target, arguments=arguments)
+        
+        # Run nmap using libnmap
+        nmap_output = run_nmap_process(target, arguments)
+        
+        # Parse the XML output
+        try:
+            nmap_report = NmapParser.parse(nmap_output)
+        except Exception as e:
+            # If XML parsing fails, return raw output
+            logger.warning(f"Failed to parse nmap XML output: {str(e)}")
+            return [TextContent(type="text", text=f"Nmap scan completed:\n{nmap_output}")]
         
         results = []
-        for host in nm.all_hosts():
-            host_info = f"Host: {host} ({nm[host].state()})\n"
+        for host in nmap_report.hosts:
+            host_info = f"Host: {host.address} ({host.status})\n"
             ports_info = []
-            for proto in nm[host].all_protocols():
-                ports = nm[host][proto].keys()
-                for port in sorted(ports):
-                    state = nm[host][proto][port]["state"]
-                    service = nm[host][proto][port].get("name", "unknown")
-                    version = nm[host][proto][port].get("product", "") + " " + nm[host][proto][port].get("version", "")
-                    script_output = nm[host][proto][port].get("script", {})
-                    script_results = "\n".join(f"Script {k}: {v}" for k, v in script_output.items()) if script_output else "No script output"
-                    ports_info.append(f"Port {port}/{proto}: {state} ({service} {version})\n{script_results}")
-                if ports_info:
-                    host_info += "\n".join(ports_info)
-                else:
-                    host_info += "No open ports found."
-                results.append(host_info)
+            
+            for service in host.services:
+                port = service.port
+                protocol = service.protocol
+                state = service.state
+                service_name = service.service or "unknown"
+                banner = service.banner or ""
+                
+                # Get script results if available
+                script_results = []
+                if hasattr(service, 'scripts') and service.scripts:
+                    for script in service.scripts:
+                        script_results.append(f"Script {script['id']}: {script['output']}")
+                
+                script_output = "\n".join(script_results) if script_results else "No script output"
+                ports_info.append(f"Port {port}/{protocol}: {state} ({service_name} {banner})\n{script_output}")
+            
+            if ports_info:
+                host_info += "\n".join(ports_info)
+            else:
+                host_info += "No open ports found."
+            results.append(host_info)
         
         scan_id = f"scan_{hash(target + arguments + str(datetime.utcnow()))}"
         conn = sqlite3.connect("server/cybersecurity.db")

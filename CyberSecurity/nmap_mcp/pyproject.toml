@@ -8,7 +8,7 @@ dependencies = [
     "aiohttp>=3.8.6",
     "cachetools>=5.3.1",
     "mcp[cli]>=0.1.2",
-    "python-nmap",
+    "python-libnmap>=0.7.3",
     "pydantic>=2.0.0",
     "shodan",
     "python-dotenv>=1.0.0",

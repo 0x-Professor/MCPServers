@@ -614,7 +614,7 @@ dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "pydantic" },
     { name = "python-dotenv" },
-    { name = "python-nmap" },
+    { name = "python-libnmap" },
     { name = "requests" },
     { name = "shodan" },
     { name = "sqlalchemy" },
@@ -628,7 +628,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=0.1.2" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "python-nmap" },
+    { name = "python-libnmap", specifier = ">=0.7.3" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "shodan" },
     { name = "sqlalchemy", specifier = ">=2.0.41" },
@@ -794,6 +794,12 @@ wheels = [
 ]
 
 [[package]]
+name = "python-libnmap"
+version = "0.7.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/b2/38e34576a715115e5bef9eff7d9989d48079c8138e5bb1d71bb8001df722/python-libnmap-0.7.3.tar.gz", hash = "sha256:d03629256c2ee9ab37390c28d4c4c2ae9637cd0861dd8ab9e0f32779545936c0", size = 39687, upload-time = "2022-09-01T21:39:29.515Z" }
+
+[[package]]
 name = "python-multipart"
 version = "0.0.20"
 source = { registry = "https://pypi.org/simple" }
@@ -801,12 +807,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/f3/87/f44d7c9f274c7ee66
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/58/38b5afbc1a800eeea951b9285d3912613f2603bdf897a4ab0f4bd7f405fc/python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104", size = 24546, upload-time = "2024-12-16T19:45:44.423Z" },
 ]
-
-[[package]]
-name = "python-nmap"
-version = "0.7.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/1b/8e6b3d1461331e4e8600faf099e7c62ba3c1603987dafdd558681fb8ba37/python-nmap-0.7.1.tar.gz", hash = "sha256:f75af6b91dd8e3b0c31f869db32163f62ada686945e5b7c25f84bc0f7fad3b64", size = 44366, upload-time = "2021-10-26T18:40:26.488Z" }
 
 [[package]]
 name = "pyunormalize"
