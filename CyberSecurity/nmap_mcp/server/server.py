@@ -456,3 +456,53 @@ async def run_os_detection(params: ScanInput, ctx: Context) -> List[TextContent]
         logger.error(f"OS detection error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
+@mcp.tool(title="Enumerate Services")
+async def enumerate_services(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Enumerate detailed service information using Nmap service detection."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = "-sV"
+        extra_args = params.extra_args
+        nse_scripts = params.nse_scripts or "ssl-cert,http-title"
+        
+        arguments = f"{scan_type} --version-intensity 9 {extra_args} --script {nse_scripts}".strip()
+        logger.info(f"Running service enumeration: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            if nm[host].state() == "up":
+                host_info = f"Host: {host} ({nm[host].state()})\n"
+                ports_info = []
+                for proto in nm[host].all_protocols():
+                    ports = nm[host][proto].keys()
+                    for port in sorted(ports):
+                        state = nm[host][proto][port]["state"]
+                        service = nm[host][proto][port].get("name", "unknown")
+                        version = nm[host][proto][port].get("product", "") + " " + nm[host][proto][port].get("version", "")
+                        extra_info = nm[host][proto][port].get("extrainfo", "")
+                        script_output = nm[host][proto][port].get("script", {})
+                        script_results = "\n".join(f"Script {k}: {v}" for k, v in script_output.items()) if script_output else "No script output"
+                        ports_info.append(f"Port {port}/{proto}: {state} ({service} {version} {extra_info})\n{script_results}")
+                if ports_info:
+                    host_info += "\n".join(ports_info)
+                else:
+                    host_info += "No services found."
+                results.append(host_info)
+        
+        scan_id = f"service_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"Service enumeration error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
