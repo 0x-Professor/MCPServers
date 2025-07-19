@@ -191,7 +191,7 @@ For advanced MCP features (e.g., prompts, resources, completions), see the [MCP 
   - Reinstall: `sudo apt install nmap -y`.
 
 - **Shodan API Errors**:
-  - Verify API key: `python3 -c "import shodan; api = shodan.Shodan('nRkTNilUGNIUJpSmnQQPYIefiCziYQnD'); print(api.info())"`.
+  - Verify API key: `python3 -c "import shodan; api = shodan.Shodan(''); print(api.info())"`.
   - Check credits at [Shodan](https://account.shodan.io).
 
 - **WSL Issues**:
