@@ -197,3 +197,30 @@ class SimpleTokenVerifier(TokenVerifier):
                 exp=datetime.utcnow().timestamp() + 3600
             )
         raise ValueError("Invalid token")
+
+# MCP Server
+mcp = FastMCP(
+    name="CybersecurityNMAP",
+    token_verifier=SimpleTokenVerifier(),
+    auth=AuthSettings(
+        issuer_url="https://auth.example.com",
+        resource_server_url="http://localhost:3001",
+        required_scopes=["cyber:scan", "cyber:analyze", "cyber:pentest"]
+    ),
+    stateless_http=True
+)
+
+# Apply rate limiting middleware
+mcp.streamable_http_app().middleware(rate_limit_middleware)
+
+# Lifespan management
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> Dict[str, Any]:
+    logger.info("Starting CybersecurityNMAP server")
+    nm = nmap.PortScanner()
+    try:
+        yield {"nmap": nm}
+    finally:
+        logger.info("Shutting down CybersecurityNMAP server")
+
+mcp.lifespan = app_lifespan
