@@ -295,4 +295,63 @@ async def run_nmap_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
         logger.error(f"Nmap scan error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
 
-     
+@mcp.tool(title="Analyze NMAP Results")
+async def analyze_nmap_results(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Analyze cached Nmap scan results for vulnerabilities using Shodan."""
+    try:
+        target = params.target
+        scan_type = params.scan_type
+        
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT results FROM scans WHERE target = ? AND scan_type = ? ORDER BY created_at DESC LIMIT 1", (target, scan_type))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return [TextContent(type="text", text="No scan results found for this target and scan type.")]
+        
+        scan_results = result[0]
+        vulnerabilities = []
+        
+        async with aiohttp.ClientSession() as session:
+            for line in scan_results.split("\n"):
+                if "Port" in line:
+                    port = int(line.split()[1].split("/")[0])
+                    service = line.split("(")[1].split(")")[0].split()[0] if "(" in line else "unknown"
+                    version = " ".join(line.split("(")[1].split(")")[0].split()[1:]) if "(" in line and len(line.split("(")[1].split(")")[0].split()) > 1 else ""
+                    
+                    # Query Shodan for vulnerabilities
+                    shodan_result = await query_shodan(target, port, service)
+                    cve_ids = shodan_result.get("cve_ids", [])
+                    shodan_details = shodan_result.get("details", "No Shodan data available")
+                    vulnerability = f"{service} vulnerability on port {port} (Version: {version})"
+                    
+                    vulnerabilities.append(VulnerabilityOutput(
+                        target=target,
+                        port=port,
+                        service=service,
+                        vulnerability=vulnerability,
+                        cve_id=",".join(cve_ids) if cve_ids else None,
+                        shodan_data=shodan_details
+                    ))
+                    
+                    conn = sqlite3.connect("server/cybersecurity.db")
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO vulnerabilities (target, port, service, vulnerability, cve_id, shodan_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (target, port, service, vulnerability, ",".join(cve_ids) if cve_ids else None, shodan_details, datetime.utcnow())
+                    )
+                    conn.commit()
+                    conn.close()
+        
+        output = [f"Analysis for {target} ({scan_type}):"]
+        for vuln in vulnerabilities:
+            output.append(f"Port {vuln.port}: {vuln.service} - {vuln.vulnerability} (CVE: {vuln.cve_id or 'None'}, Shodan: {vuln.shodan_data})")
+        
+        return [TextContent(type="text", text="\n".join(output) or "No vulnerabilities found.")]
+    
+    except Exception as e:
+        logger.error(f"Analysis error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
+
