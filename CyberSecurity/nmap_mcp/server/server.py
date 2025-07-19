@@ -7,6 +7,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field, filed_validator
+from pydantic.types import T
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent
 from mcp.server.auth.provider import TokenVerifier, TokenInfo
@@ -685,3 +686,71 @@ async def run_host_discovery(params: ScanInput, ctx: Context) -> List[TextConten
     except Exception as e:
         logger.error(f"Host discovery error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
+@mcp.tool(title="Run Advanced NSE Scan")
+async def run_advanced_nse_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Run an advanced Nmap NSE scan with multiple scripts for targeted vulnerability assessment."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = "-sV"  # NSE requires version detection
+        nse_scripts = params.nse_scripts or "vulners,http-enum,ftp-anon,mysql-vuln-cve2012-2122"
+        
+        arguments = f"{scan_type} --script {nse_scripts} --script-args vulnscan=full"
+        logger.info(f"Running advanced NSE scan: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            if nm[host].state() == "up":
+                host_info = f"Host: {host} ({nm[host].state()})\n"
+                ports_info = []
+                for proto in nm[host].all_protocols():
+                    ports = nm[host][proto].keys()
+                    for port in sorted(ports):
+                        state = nm[host][proto][port]["state"]
+                        service = nm[host][proto][port].get("name", "unknown")
+                        version = nm[host][proto][port].get("product", "") + " " + nm[host][proto][port].get("version", "")
+                        script_output = nm[host][proto][port].get("script", {})
+                        script_results = "\n".join(f"Script {k}: {v}" for k, v in script_output.items()) if script_output else "No vulnerabilities found"
+                        
+                        # Query Shodan for vulnerabilities
+                        shodan_result = await query_shodan(host, port, service)
+                        cve_ids = shodan_result.get("cve_ids", [])
+                        shodan_details = shodan_result.get("details", "No Shodan data available")
+                        
+                        ports_info.append(f"Port {port}/{proto}: {state} ({service} {version})\nVulnerabilities:\n{script_results}\nShodan: {shodan_details}")
+                        
+                        conn = sqlite3.connect("server/cybersecurity.db")
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO vulnerabilities (target, port, service, vulnerability, cve_id, shodan_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (host, port, service, f"{service} on port {port}", ",".join(cve_ids) if cve_ids else None, shodan_details, datetime.utcnow())
+                        )
+                        conn.commit()
+                        conn.close()
+                
+                if ports_info:
+                    host_info += "\n".join(ports_info)
+                else:
+                    host_info += "No open ports found."
+                results.append(host_info)
+        
+        scan_id = f"advanced_nse_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"Advanced NSE scan error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+if __name__ == "__main__":
+    init_db()
+    mcp.run()
