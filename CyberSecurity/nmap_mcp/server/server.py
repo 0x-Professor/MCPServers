@@ -9,10 +9,7 @@ from typing import List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent
-from mcp.server.auth.provider import TokenVerifier, TokenInfo
-from mcp.server.auth.settings import AuthSettings
 import aiohttp
-from aiohttp import web
 from dotenv import load_dotenv
 import shodan
 
@@ -158,60 +155,8 @@ class HostDiscoveryOutput(BaseModel):
     status: str
     details: str
 
-# Rate limiting middleware
-async def rate_limit_middleware(app, handler):
-    async def middleware(request):
-        client_ip = request.remote
-        cache_key = f"rate_limit_{client_ip}"
-        conn = sqlite3.connect("server/cybersecurity.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT count, last_reset FROM rate_limits WHERE ip = ?", (client_ip,))
-        result = cursor.fetchone()
-        
-        current_time = datetime.utcnow().timestamp()
-        if result:
-            count, last_reset = result
-            if current_time - last_reset > 60:
-                count = 0
-                cursor.execute("UPDATE rate_limits SET count = 0, last_reset = ? WHERE ip = ?", (current_time, client_ip))
-            if count >= 15:
-                conn.close()
-                raise web.HTTPTooManyRequests(text="Rate limit exceeded. Try again in 60 seconds.")
-            cursor.execute("UPDATE rate_limits SET count = count + 1 WHERE ip = ?", (client_ip,))
-        else:
-            cursor.execute("INSERT INTO rate_limits (ip, count, last_reset) VALUES (?, 1, ?)", (client_ip, current_time))
-        
-        conn.commit()
-        conn.close()
-        return await handler(request)
-    return middleware
-
-# OAuth Token Verifier
-class SimpleTokenVerifier(TokenVerifier):
-    async def verify_token(self, token: str) -> TokenInfo:
-        if token == os.getenv("OAUTH_TOKEN"):
-            return TokenInfo(
-                active=True,
-                scope=["cyber:scan", "cyber:analyze", "cyber:pentest"],
-                client_id="mcp-client",
-                exp=datetime.utcnow().timestamp() + 3600
-            )
-        raise ValueError("Invalid token")
-
 # MCP Server
-mcp = FastMCP(
-    name="CybersecurityNMAP",
-    token_verifier=SimpleTokenVerifier(),
-    auth=AuthSettings(
-        issuer_url="https://auth.example.com",
-        resource_server_url="http://localhost:6027",
-        required_scopes=["cyber:scan", "cyber:analyze", "cyber:pentest"]
-    ),
-    stateless_http=True
-)
-
-# Apply rate limiting middleware
-mcp.streamable_http_app().middleware(rate_limit_middleware)
+mcp = FastMCP("CybersecurityNMAP")
 
 # Lifespan management
 @asynccontextmanager
