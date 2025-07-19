@@ -85,15 +85,16 @@ Tools are exposed as MCP endpoints, accessible via HTTP or the MCP Inspector UI.
 1. **Clone the Repository** (optional, if hosted):
 
    ```bash
-   git clone https://github.com/your-repo/nft-marketplace-assistant.git
-   cd nft-marketplace-assistant
+   git clone https://github.com/0x-Professor/MCPServers.git
+   cd BlockChain
+   cd nft_marketPlace_assistant
    ```
 
 2. **Create a uv-Managed Project** (if starting fresh):
 
    ```bash
-   uv init nft-marketplace-assistant
-   cd nft-marketplace-assistant
+   uv init nft_marketPlace_assistant
+   cd nft_marketPlace_assistant
    ```
 
 3. **Set Up a Virtual Environment**:
@@ -165,7 +166,7 @@ Start the server with the MCP Inspector UI for testing and debugging:
 uv run mcp dev .\server\server.py
 ```
 
-Access the MCP Inspector at `http://localhost:3001`.
+Access the MCP Inspector at `http://localhost:6277`.
 
 ### Production Mode
 
