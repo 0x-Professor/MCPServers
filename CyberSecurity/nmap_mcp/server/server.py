@@ -158,11 +158,43 @@ class HostDiscoveryOutput(BaseModel):
 # MCP Server
 mcp = FastMCP("CybersecurityNMAP")
 
+# Configure nmap path for different environments
+def get_nmap_scanner():
+    """Initialize nmap scanner with proper path configuration."""
+    # Try different nmap paths
+    nmap_paths = [
+        "nmap",  # Default system PATH
+        "C:\\Program Files (x86)\\Nmap\\nmap.exe",  # Common Windows install path
+        "C:\\Program Files\\Nmap\\nmap.exe",  # Alternative Windows path
+        "wsl nmap",  # WSL nmap command
+    ]
+    
+    for nmap_path in nmap_paths:
+        try:
+            logger.info(f"Trying nmap path: {nmap_path}")
+            nm = nmap.PortScanner(nmap_search_path=[nmap_path] if nmap_path != "nmap" else [])
+            # Test if nmap works
+            nm.scan("127.0.0.1", "80", "-sn")
+            logger.info(f"Successfully configured nmap with path: {nmap_path}")
+            return nm
+        except Exception as e:
+            logger.warning(f"Failed to use nmap path {nmap_path}: {str(e)}")
+            continue
+    
+    # If all paths fail, try default without path specification
+    try:
+        nm = nmap.PortScanner()
+        logger.info("Using default nmap configuration")
+        return nm
+    except Exception as e:
+        logger.error(f"Failed to initialize nmap scanner: {str(e)}")
+        raise Exception("Could not initialize nmap scanner. Please ensure nmap is installed and accessible.")
+
 # Lifespan management
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> Dict[str, Any]:
     logger.info("Starting CybersecurityNMAP server")
-    nm = nmap.PortScanner()
+    nm = get_nmap_scanner()
     try:
         yield {"nmap": nm}
     finally:
