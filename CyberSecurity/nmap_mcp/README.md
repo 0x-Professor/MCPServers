@@ -62,10 +62,19 @@ source .venv/bin/activate
 ```
 
 ### Step 4: Install Dependencies
-Add required packages using `uv`:
+Add required packages using `uv`. This project supports both `python-libnmap` and `python-nmap` libraries:
+
+**Option A: Using python-libnmap (Recommended for cross-platform compatibility):**
+```bash
+uv add "mcp[cli]>=0.1.2" python-libnmap>=0.7.3 pydantic>=2.0.0 aiohttp>=3.8.6 python-dotenv>=1.0.0 shodan>=1.31.0
+```
+
+**Option B: Using python-nmap (Alternative if libnmap doesn't work):**
 ```bash
 uv add "mcp[cli]>=0.1.2" python-nmap>=0.7.1 pydantic>=2.0.0 aiohttp>=3.8.6 python-dotenv>=1.0.0 shodan>=1.31.0
 ```
+
+> **Note**: If you encounter issues with one library, try the other. The server code is designed to work with both, but compatibility may vary depending on your system configuration.
 
 ### Step 5: Configure Environment
 Create a `.env` file in the project root:
@@ -184,29 +193,77 @@ For advanced MCP features (e.g., prompts, resources, completions), see the [MCP 
 
 ## Troubleshooting
 
-- **Nmap Not Found**:
-  - Verify: `nmap --version`.
-  - Ensure PATH: `export PATH=$PATH:/usr/bin`.
-  - Test: `python3 -c "import nmap; nm = nmap.PortScanner(); print(nm.nmap_version())"`.
-  - Reinstall: `sudo apt install nmap -y`.
+### Nmap Library Compatibility Issues
 
-- **Shodan API Errors**:
-  - Verify API key: `python3 -c "import shodan; api = shodan.Shodan(''); print(api.info())"`.
-  - Check credits at [Shodan](https://account.shodan.io).
+**If you encounter "Error: 'nmap'" or import errors:**
 
-- **WSL Issues**:
-  - Test networking: `ping scanme.nmap.org`.
-  - Update WSL: `wsl --update` in PowerShell.
-  - Use `--unprivileged` in `server.py` for scans if raw socket issues occur:
-    ```python
-    arguments = f"{scan_type} --script {nse_scripts} --unprivileged"
+1. **Try switching between nmap libraries:**
+   - If using `python-libnmap`, try switching to `python-nmap`:
+     ```bash
+     uv remove python-libnmap
+     uv add python-nmap>=0.7.1
+     ```
+   - If using `python-nmap`, try switching to `python-libnmap`:
+     ```bash
+     uv remove python-nmap
+     uv add python-libnmap>=0.7.3
+     ```
+
+2. **Update the server imports accordingly:**
+   - For `python-libnmap`:
+     ```python
+     from libnmap.process import NmapProcess
+     from libnmap.parser import NmapParser
+     ```
+   - For `python-nmap`:
+     ```python
+     import nmap
+     ```
+
+### Environment-Specific Issues
+
+- **Nmap Binary Not Found**:
+  - **Windows**: Download and install from [nmap.org](https://nmap.org/download.html)
+  - **WSL/Linux**: `sudo apt update && sudo apt install nmap -y`
+  - **Verify installation**: `nmap --version`
+  - **Check PATH**: Ensure nmap is in your system PATH
+
+- **Cross-Platform Compatibility**:
+  - **Windows + WSL**: The server automatically detects and tries multiple nmap paths
+  - **If WSL nmap works but Windows doesn't**: Run the entire server in WSL
+  - **Test nmap accessibility**:
+    ```bash
+    # For python-nmap
+    python3 -c "import nmap; nm = nmap.PortScanner(); print(nm.nmap_version())"
+    
+    # For python-libnmap
+    python3 -c "from libnmap.process import NmapProcess; print('libnmap available')"
     ```
 
-- **Logs**:
-  Check detailed errors:
-  ```bash
-  uv run mcp dev ./server/server.py
-  ```
+- **Permission Issues**:
+  - Add `--unprivileged` flag to nmap arguments if you get permission errors
+  - Run with administrator/sudo privileges if needed for advanced scans
+
+### Other Common Issues
+
+- **Shodan API Errors**:
+  - Verify API key: `python3 -c "import shodan; api = shodan.Shodan('your_key'); print(api.info())"`
+  - Check credits at [Shodan](https://account.shodan.io)
+
+- **WSL Networking Issues**:
+  - Test connectivity: `ping scanme.nmap.org`
+  - Update WSL: `wsl --update` in PowerShell
+  - Check Windows Defender/Firewall settings
+
+- **Server Startup Issues**:
+  - Check detailed logs:
+    ```bash
+    uv run mcp dev ./server/server.py
+    ```
+  - Verify all dependencies are installed:
+    ```bash
+    uv sync
+    ```
 
 ## Legal and Ethical Notes
 
