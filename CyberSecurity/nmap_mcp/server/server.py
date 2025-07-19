@@ -553,3 +553,135 @@ async def analyze_firewall(params: ScanInput, ctx: Context) -> List[TextContent]
     except Exception as e:
         logger.error(f"Firewall analysis error: {str(e)}")
         return [TextContent(type="text", text=f"Error: {str(e)}")]
+@mcp.tool(title="Run Full Pentest Scan")
+async def run_full_pentest_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Run a comprehensive pentesting scan combining multiple Nmap techniques and Shodan analysis."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        nse_scripts = params.nse_scripts or "vulners,http-enum,ssl-cert,http-vuln-cve2017-5638"
+        arguments = f"-sS -sV -O --script {nse_scripts} --version-intensity 9"
+        
+        logger.info(f"Running full pentest scan: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            if nm[host].state() == "up":
+                host_info = f"Host: {host} ({nm[host].state()})\n"
+                # Ports and services
+                ports_info = []
+                for proto in nm[host].all_protocols():
+                    ports = nm[host][proto].keys()
+                    for port in sorted(ports):
+                        state = nm[host][proto][port]["state"]
+                        service = nm[host][proto][port].get("name", "unknown")
+                        version = nm[host][proto][port].get("product", "") + " " + nm[host][proto][port].get("version", "")
+                        script_output = nm[host][proto][port].get("script", {})
+                        script_results = "\n".join(f"Script {k}: {v}" for k, v in script_output.items()) if script_output else "No script output"
+                        
+                        # Query Shodan for vulnerabilities
+                        shodan_result = await query_shodan(host, port, service)
+                        cve_ids = shodan_result.get("cve_ids", [])
+                        shodan_details = shodan_result.get("details", "No Shodan data available")
+                        
+                        ports_info.append(f"Port {port}/{proto}: {state} ({service} {version})\n{script_results}\nShodan: {shodan_details}")
+                        
+                        conn = sqlite3.connect("server/cybersecurity.db")
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO vulnerabilities (target, port, service, vulnerability, cve_id, shodan_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (host, port, service, f"{service} on port {port}", ",".join(cve_ids) if cve_ids else None, shodan_details, datetime.utcnow())
+                        )
+                        conn.commit()
+                        conn.close()
+                
+                if ports_info:
+                    host_info += "Ports and Services:\n" + "\n".join(ports_info) + "\n"
+                else:
+                    host_info += "No open ports found.\n"
+                
+                # OS detection
+                os_info = nm[host].get("osmatch", [])
+                if os_info:
+                    host_info += "OS Detection:\n"
+                    for os in os_info:
+                        os_name = os.get("name", "Unknown")
+                        accuracy = float(os.get("accuracy", 0))
+                        host_info += f"OS: {os_name} (Accuracy: {accuracy}%)\n"
+                        conn = sqlite3.connect("server/cybersecurity.db")
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO vulnerabilities (target, port, service, vulnerability, cve_id, shodan_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (host, 0, "os", f"OS: {os_name}", None, None, datetime.utcnow())
+                        )
+                        conn.commit()
+                        conn.close()
+                else:
+                    host_info += "No OS information found.\n"
+                
+                results.append(host_info)
+        
+        scan_id = f"pentest_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, "pentest", arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"Full pentest scan error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+@mcp.tool(title="Run Host Discovery")
+async def run_host_discovery(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Perform host discovery using Nmap ping scans."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = params.scan_type if params.scan_type in ["-PE", "-PP"] else "-PE"
+        extra_args = params.extra_args
+        
+        arguments = f"{scan_type} {extra_args}".strip()
+        logger.info(f"Running host discovery: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            status = nm[host].state()
+            details = f"Host: {host} is {status}"
+            if status == "up":
+                details += "\nAdditional Info: Host responded to ping scan."
+            else:
+                details += "\nAdditional Info: Host did not respond to ping scan."
+            results.append(details)
+            
+            conn = sqlite3.connect("server/cybersecurity.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO vulnerabilities (target, port, service, vulnerability, cve_id, shodan_data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (host, 0, "host", f"Host status: {status}", None, None, datetime.utcnow())
+            )
+            conn.commit()
+            conn.close()
+        
+        scan_id = f"host_scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No hosts found.")]
+    
+    except Exception as e:
+        logger.error(f"Host discovery error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
