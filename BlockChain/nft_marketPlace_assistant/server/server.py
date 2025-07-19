@@ -227,3 +227,85 @@ MARKETPLACE_CONTRACTS = {
         ]
     }
 }
+
+# Enums
+class TransactionStatus(Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+# Pydantic Models
+class NFTMetadata(BaseModel):
+    contract_address: str = Field(description="NFT contract address")
+    token_id: str = Field(description="NFT token ID")
+    name: Optional[str] = Field(default=None, description="NFT name")
+    description: Optional[str] = Field(default=None, description="NFT description")
+    image_url: Optional[str] = Field(default=None, description="NFT image URL")
+    attributes: Optional[List[Dict[str, Any]]] = Field(default=None, description="NFT attributes")
+    chain: str = Field(description="Blockchain network")
+
+class BidTransaction(BaseModel):
+    id: str = Field(description="Unique transaction ID")
+    collection: str = Field(description="NFT collection address")
+    token_id: Optional[str] = Field(default=None, description="NFT token ID")
+    amount: str = Field(description="Bid amount in native token")
+    bidder: str = Field(description="Bidder address")
+    status: str = Field(description="Transaction status")
+    tx_hash: Optional[str] = Field(default=None, description="Transaction hash")
+    created_at: str = Field(description="Transaction creation time")
+    marketplace: str = Field(description="Marketplace name")
+
+class MintTransaction(BaseModel):
+    id: str = Field(description="Unique transaction ID")
+    contract_address: str = Field(description="NFT contract address")
+    token_id: Optional[str] = Field(default=None, description="Minted token ID")
+    minter: str = Field(description="Minter address")
+    metadata: Dict[str, Any] = Field(description="NFT metadata")
+    status: str = Field(description="Transaction status")
+    tx_hash: Optional[str] = Field(default=None, description="Transaction hash")
+    created_at: str = Field(description="Transaction creation time")
+
+class SaleListing(BaseModel):
+    id: str = Field(description="Unique listing ID")
+    contract_address: str = Field(description="NFT contract address")
+    token_id: str = Field(description="NFT token ID")
+    price: str = Field(description="Sale price in native token")
+    seller: str = Field(description="Seller address")
+    status: str = Field(description="Listing status")
+    created_at: str = Field(description="Listing creation time")
+    marketplace: str = Field(description="Marketplace name")
+
+class MarketTrend(BaseModel):
+    collection: str = Field(description="NFT collection address")
+    floor_price: Optional[str] = Field(default=None, description="Floor price in native token")
+    volume_24h: Optional[str] = Field(default=None, description="24-hour trading volume")
+    sales_24h: Optional[int] = Field(default=None, description="Number of sales in 24 hours")
+    chain: str = Field(description="Blockchain network")
+
+class TokenInfo(BaseModel):
+    sub: str = Field(description="Subject identifier of the token")
+    scopes: List[str] = Field(description="List of scopes granted by the token")
+    expires_at: datetime = Field(description="Token expiration timestamp")
+
+# Authentication
+class SimpleTokenVerifier(TokenVerifier):
+    async def verify_token(self, token: str) -> TokenInfo:
+        """Verify OAuth 2.1 token"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    f"{AUTH_ISSUER_URL}/introspect",
+                    json={"token": token}
+                ) as response:
+                    data = await response.json()
+                    if data.get("active", False):
+                        return TokenInfo(
+                            sub=data.get("sub", ""),
+                            scopes=data.get("scope", "").split(),
+                            expires_at=datetime.fromtimestamp(data.get("exp", 0))
+                        )
+                    raise ValueError("Invalid or inactive token")
+            except Exception as e:
+                logger.error(f"Token verification failed: {str(e)}")
+                raise ValueError(f"Token verification failed: {str(e)}")
