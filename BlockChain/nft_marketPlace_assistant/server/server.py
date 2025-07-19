@@ -34,6 +34,7 @@ from mcp.server.auth.settings import AuthSettings
 import sqlite3
 from cachetools import TTLCache
 
+mcp = FastMCP(name = "NFT MarketPlace Assistant")
 # Load environment variables
 load_dotenv()
 INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "your_infura_project_id")
