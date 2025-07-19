@@ -70,7 +70,7 @@ uv add "mcp[cli]>=0.1.2" python-nmap>=0.7.1 pydantic>=2.0.0 aiohttp>=3.8.6 pytho
 ### Step 5: Configure Environment
 Create a `.env` file in the project root:
 ```bash
-echo -e "OAUTH_TOKEN=mock-token-1234567890\nSHODAN_API_KEY=nRkTNilUGNIUJpSmnQQPYIefiCziYQnD" > .env
+echo -e "OAUTH_TOKEN=mock-token-1234567890\nSHODAN_API_KEY=your api key" > .env
 ```
 
 ### Step 6: Save the Server Code
