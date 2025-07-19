@@ -788,7 +788,7 @@ class NFTMarketplaceServer:
 
 
 # Initialize the server and expose it globally
-server_instance = NFTMarketplaceServer()
-mcp = server_instance.mcp
-app = mcp  # Alternative name for compatibility
-server = mcp  # Alternative name for compatibility
+server_instance = NFTMarketplaceServer().mcp
+#mcp = server_instance
+#app = mcp  # Alternative name for compatibility
+#server = mcp  # Alternative name for compatibility
