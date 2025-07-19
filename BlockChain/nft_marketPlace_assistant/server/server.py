@@ -412,3 +412,15 @@ class NFTMarketplaceServer:
             db_connection.close()
             logger.info("Server shutdown: Closed database connection")
 
+    def _setup_handlers(self):
+        """Setup MCP handlers for NFT operations"""
+        self.mcp.register_tool(
+            "get_nft_metadata",
+            self.get_nft_metadata,
+            description="Retrieve metadata for an NFT",
+            arguments=[
+                CompletionArgument(name="contract_address", type="string", description="NFT contract address"),
+                CompletionArgument(name="token_id", type="string", description="NFT token ID"),
+                CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
+            ]
+        )
