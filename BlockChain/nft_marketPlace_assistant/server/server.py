@@ -721,4 +721,68 @@ class NFTMarketplaceServer:
             logger.error(f"Error listing NFT for sale: {e}")
             return Completion(result={"error": str(e)}, status="error")
 
-    
+    async def get_marketplace_trends(self, context: AppContext, arguments: Dict[str, Any]) -> Completion:
+        """Analyze NFT marketplace trends"""
+        collection = arguments.get("collection")
+        chain = arguments.get("chain", "ethereum")
+
+        if not is_address(collection):
+            return Completion(result={"error": "Invalid collection address"}, status="error")
+        if chain not in SUPPORTED_CHAINS:
+            return Completion(result={"error": f"Chain {chain} not supported"}, status="error")
+
+        try:
+            w3 = context.web3_connections.get(chain)
+            if not w3:
+                return Completion(result={"error": f"Chain {chain} not connected"}, status="error")
+
+            # Simulate trend analysis (actual implementation requires marketplace API or contract event logs)
+            # Example: Fetch floor price and volume via OpenSea/Alchemy API
+            return Completion(
+                result=MarketTrend(
+                    collection=collection,
+                    floor_price="0.1",  # Placeholder
+                    volume_24h="10.5",  # Placeholder
+                    sales_24h=50,       # Placeholder
+                    chain=chain
+                ).dict(),
+                status="success"
+            )
+        except Exception as e:
+            logger.error(f"Error fetching marketplace trends: {e}")
+            return Completion(result={"error": str(e)}, status="error")
+
+    async def monitor_nft_transaction(self, context: AppContext, arguments: Dict[str, Any]) -> Completion:
+        """Monitor an NFT transaction status"""
+        tx_id = arguments.get("tx_id")
+        chain = arguments.get("chain", "ethereum")
+
+        if not tx_id:
+            return Completion(result={"error": "Invalid transaction ID"}, status="error")
+        if chain not in SUPPORTED_CHAINS:
+            return Completion(result={"error": f"Chain {chain} not supported"}, status="error")
+
+        try:
+            w3 = context.web3_connections.get(chain)
+            if not w3:
+                return Completion(result={"error": f"Chain {chain} not connected"}, status="error")
+
+            cursor = context.db_connection.cursor()
+            cursor.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,))
+            tx = cursor.fetchone()
+            if not tx:
+                return Completion(result={"error": "Transaction not found"}, status="error")
+
+            # Simulate transaction status check
+            status = TransactionStatus.PENDING.value  # Placeholder; check tx_hash status via w3.eth.get_transaction_receipt
+            cursor.execute("UPDATE transactions SET status = ? WHERE id = ?", (status, tx_id))
+            context.db_connection.commit()
+
+            return Completion(
+                result={"tx_id": tx_id, "status": status},
+                status="success"
+            )
+        except Exception as e:
+            logger.error(f"Error monitoring transaction: {e}")
+            return Completion(result={"error": str(e)}, status="error")
+
