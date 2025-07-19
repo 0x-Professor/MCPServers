@@ -6,8 +6,7 @@ import nmap
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
-from pydantic import BaseModel, Field, filed_validator
-from pydantic.types import T
+from pydantic import BaseModel, Field, field_validator
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent
 from mcp.server.auth.provider import TokenVerifier, TokenInfo
