@@ -34,3 +34,37 @@ from mcp.server.auth.settings import AuthSettings
 import sqlite3
 from cachetools import TTLCache
 
+# Load environment variables
+load_dotenv()
+INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "your_infura_project_id")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "your_etherscan_api_key")
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "your_alchemy_api_key")
+HMAC_SECRET = os.getenv("HMAC_SECRET", "your-secret-key")
+AUTH_ISSUER_URL = os.getenv("AUTH_ISSUER_URL", "https://auth.example.com")
+AUTH_SERVER_URL = os.getenv("AUTH_SERVER_URL", "http://localhost:3001")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+
+# Supported chains
+SUPPORTED_CHAINS = {
+    "ethereum": {
+        "chain_id": 1,
+        "name": "Ethereum Mainnet",
+        "rpc_url": f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+        "explorer": "https://api.etherscan.io/api",
+        "native_token": "ETH",
+        "decimals": 18
+    },
+    "polygon": {
+        "chain_id": 137,
+        "name": "Polygon",
+        "rpc_url": f"https://polygon-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+        "explorer": "https://api.polygonscan.com/api",
+        "native_token": "MATIC",
+        "decimals": 18
+    }
+}
+
