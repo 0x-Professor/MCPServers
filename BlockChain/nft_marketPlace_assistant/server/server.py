@@ -31,8 +31,8 @@ from cachetools import TTLCache
 load_dotenv()
 INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "7464fe4568974a00b5cf20e94ebc4833")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "3NK7D3FBF2AQ23RBEDPX9BVZH4DD4E3DHZ")
-ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "your_alchemy_api_key")
-HMAC_SECRET = os.getenv("HMAC_SECRET", "your-secret-key")
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "vH5jh4T1PWnfVIxV7su69")
+HMAC_SECRET = os.getenv("HMAC_SECRET", "wfnwvnw23452tdvwt454354fwefw4t3")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
