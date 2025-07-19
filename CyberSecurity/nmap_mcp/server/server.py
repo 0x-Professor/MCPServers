@@ -204,7 +204,7 @@ mcp = FastMCP(
     token_verifier=SimpleTokenVerifier(),
     auth=AuthSettings(
         issuer_url="https://auth.example.com",
-        resource_server_url="http://localhost:3001",
+        resource_server_url="http://localhost:6027",
         required_scopes=["cyber:scan", "cyber:analyze", "cyber:pentest"]
     ),
     stateless_http=True
@@ -224,3 +224,75 @@ async def app_lifespan(server: FastMCP) -> Dict[str, Any]:
         logger.info("Shutting down CybersecurityNMAP server")
 
 mcp.lifespan = app_lifespan
+
+async def query_shodan(target: str, port: int, service: str) -> Dict[str, Any]:
+    """Query Shodan for vulnerability data."""
+    if not shodan_api:
+        return {"error": "Shodan API not initialized"}
+    
+    try:
+        query = f"port:{port} {service} hostname:{target}"
+        result = shodan_api.search(query)
+        vulns = []
+        for host in result.get("matches", []):
+            if host.get("vulns"):
+                vulns.extend(host["vulns"])
+        return {"cve_ids": vulns, "details": f"Shodan found {len(vulns)} vulnerabilities for {service} on port {port}"}
+    except shodan.APIError as e:
+        logger.error(f"Shodan API error: {str(e)}")
+        return {"error": str(e)}
+
+@mcp.tool(title="Run NMAP Scan")
+async def run_nmap_scan(params: ScanInput, ctx: Context) -> List[TextContent]:
+    """Run an Nmap scan on a target with specified scan type and optional NSE scripts."""
+    try:
+        nm = ctx.request_context.lifespan_context["nmap"]
+        target = params.target
+        scan_type = params.scan_type
+        extra_args = params.extra_args
+        nse_scripts = params.nse_scripts
+        
+        arguments = f"{scan_type} {extra_args}"
+        if nse_scripts:
+            arguments += f" --script {nse_scripts}"
+        arguments = arguments.strip()
+        
+        logger.info(f"Running Nmap scan: {arguments} on {target}")
+        nm.scan(target, arguments=arguments)
+        
+        results = []
+        for host in nm.all_hosts():
+            host_info = f"Host: {host} ({nm[host].state()})\n"
+            ports_info = []
+            for proto in nm[host].all_protocols():
+                ports = nm[host][proto].keys()
+                for port in sorted(ports):
+                    state = nm[host][proto][port]["state"]
+                    service = nm[host][proto][port].get("name", "unknown")
+                    version = nm[host][proto][port].get("product", "") + " " + nm[host][proto][port].get("version", "")
+                    script_output = nm[host][proto][port].get("script", {})
+                    script_results = "\n".join(f"Script {k}: {v}" for k, v in script_output.items()) if script_output else "No script output"
+                    ports_info.append(f"Port {port}/{proto}: {state} ({service} {version})\n{script_results}")
+                if ports_info:
+                    host_info += "\n".join(ports_info)
+                else:
+                    host_info += "No open ports found."
+                results.append(host_info)
+        
+        scan_id = f"scan_{hash(target + arguments + str(datetime.utcnow()))}"
+        conn = sqlite3.connect("server/cybersecurity.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO scans (id, target, scan_type, arguments, results, created_at, chain) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (scan_id, target, scan_type, arguments, "\n".join(results), datetime.utcnow(), "none")
+        )
+        conn.commit()
+        conn.close()
+        
+        return [TextContent(type="text", text="\n\n".join(results) or "No results found.")]
+    
+    except Exception as e:
+        logger.error(f"Nmap scan error: {str(e)}")
+        return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+     
