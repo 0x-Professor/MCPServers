@@ -96,3 +96,41 @@ ALLOWED_NSE_SCRIPTS = [
     "vulners", "http-enum", "smb-vuln-ms17-010", "ssl-cert", "http-title", "dns-brute",
     "http-vuln-cve2017-5638", "ftp-anon", "mysql-vuln-cve2012-2122"
 ]
+
+
+# Pydantic models for validation
+class ScanInput(BaseModel):
+    target: str = Field(..., description="Target IP or hostname (e.g., 192.168.1.1 or scanme.nmap.org)")
+    scan_type: str = Field(default="-sS", description="Nmap scan type (e.g., -sS, -sT, -sU, -sF, -sN, -sX, -sA, -sW, -sM, -sV, -O, -PE, -PP)")
+    extra_args: str = Field(default="", description="Additional safe Nmap arguments (e.g., --spoof-mac 0, --data-length 100)")
+    nse_scripts: str = Field(default="", description="Comma-separated NSE scripts (e.g., vulners,http-enum)")
+    
+    @field_validator("target")
+    def validate_target(cls, v):
+        if not v or len(v) > 255 or any(c in v for c in [" ", ";", "|", "&"]):
+            raise ValueError("Invalid target: must be a valid IP/hostname, max 255 chars, no dangerous chars")
+        return v
+    
+    @field_validator("scan_type")
+    def validate_scan_type(cls, v):
+        if v not in ALLOWED_SCAN_TYPES:
+            raise ValueError(f"Invalid scan type: must be one of {list(ALLOWED_SCAN_TYPES.keys())}")
+        return v
+    
+    @field_validator("extra_args")
+    def validate_extra_args(cls, v):
+        forbidden = ["--script", "-oA", "-oN", "-oX", "--output", "--privileged", "--unprivileged", "-iL"]
+        if any(arg in v for arg in forbidden):
+            raise ValueError(f"Forbidden arguments detected in extra_args: {forbidden}")
+        return v
+    
+    @field_validator("nse_scripts")
+    def validate_nse_scripts(cls, v):
+        if not v:
+            return v
+        scripts = v.split(",")
+        for script in scripts:
+            if script.strip() not in ALLOWED_NSE_SCRIPTS:
+                raise ValueError(f"Invalid NSE script: {script}. Must be one of {ALLOWED_NSE_SCRIPTS}")
+        return v
+    
