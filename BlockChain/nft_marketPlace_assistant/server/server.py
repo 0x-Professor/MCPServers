@@ -458,3 +458,58 @@ class NFTMarketplaceServer:
                 CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
             ]
         )
+        self.mcp.register_tool(
+            "place_bid",
+            self.place_bid,
+            description="Place a bid on an NFT auction",
+            arguments=[
+                CompletionArgument(name="collection", type="string", description="NFT collection contract address"),
+                CompletionArgument(name="token_id", type="string", description="NFT token ID"),
+                CompletionArgument(name="amount", type="string", description="Bid amount in native token"),
+                CompletionArgument(name="bidder", type="string", description="Bidder address"),
+                CompletionArgument(name="marketplace", type="string", description="Marketplace name (e.g., opensea, rarible)", default="opensea"),
+                CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
+            ]
+        )
+        self.mcp.register_tool(
+            "mint_nft",
+            self.mint_nft,
+            description="Mint a new NFT",
+            arguments=[
+                CompletionArgument(name="contract_address", type="string", description="NFT contract address"),
+                CompletionArgument(name="metadata", type="dict", description="NFT metadata (e.g., name, description, image_url)"),
+                CompletionArgument(name="minter", type="string", description="Minter address"),
+                CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
+            ]
+        )    
+        self.mcp.register_tool(
+            "list_nft_for_sale",
+            self.list_nft_for_sale,
+            description="List an NFT for sale",
+            arguments=[
+                CompletionArgument(name="contract_address", type="string", description="NFT contract address"),
+                CompletionArgument(name="token_id", type="string", description="NFT token ID"),
+                CompletionArgument(name="price", type="string", description="Sale price in native token"),
+                CompletionArgument(name="seller", type="string", description="Seller address"),
+                CompletionArgument(name="marketplace", type="string", description="Marketplace name (e.g., opensea, rarible)", default="opensea"),
+                CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
+            ]
+        )
+        self.mcp.register_tool(
+            "get_marketplace_trends",
+            self.get_marketplace_trends,
+            description="Analyze NFT marketplace trends",
+            arguments=[
+                CompletionArgument(name="collection", type="string", description="NFT collection contract address"),
+                CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
+            ]
+        )
+        self.mcp.register_tool(
+            "monitor_nft_transaction",
+            self.monitor_nft_transaction,
+            description="Monitor an NFT transaction status",
+            arguments=[
+                CompletionArgument(name="tx_id", type="string", description="Transaction ID"),
+                CompletionArgument(name="chain", type="string", description="Blockchain network (default: ethereum)", default="ethereum")
+            ]
+        )
