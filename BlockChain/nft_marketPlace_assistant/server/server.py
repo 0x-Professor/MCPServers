@@ -34,7 +34,6 @@ from mcp.server.auth.settings import AuthSettings
 import sqlite3
 from cachetools import TTLCache
 
-mcp = FastMCP(name = "NFT MarketPlace Assistant")
 # Load environment variables
 load_dotenv()
 INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "your_infura_project_id")
@@ -787,3 +786,9 @@ class NFTMarketplaceServer:
             logger.error(f"Error monitoring transaction: {e}")
             return Completion(result={"error": str(e)}, status="error")
 
+
+# Initialize the server and expose it globally
+server_instance = NFTMarketplaceServer()
+mcp = server_instance.mcp
+app = mcp  # Alternative name for compatibility
+server = mcp  # Alternative name for compatibility
