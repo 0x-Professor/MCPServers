@@ -134,3 +134,26 @@ class ScanInput(BaseModel):
                 raise ValueError(f"Invalid NSE script: {script}. Must be one of {ALLOWED_NSE_SCRIPTS}")
         return v
     
+class VulnerabilityOutput(BaseModel):
+    target: str
+    port: int
+    service: str
+    vulnerability: str
+    cve_id: str = None
+    shodan_data: str = None
+
+class OSOutput(BaseModel):
+    target: str
+    os_name: str
+    os_version: str
+    accuracy: float
+
+class FirewallOutput(BaseModel):
+    target: str
+    firewall_detected: bool
+    details: str
+
+class HostDiscoveryOutput(BaseModel):
+    target: str
+    status: str
+    details: str
