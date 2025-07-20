@@ -100,3 +100,35 @@ class ComplianceDB:
                     review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+    def log_action(self, action: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO audit_logs (action) VALUES (?)", (action,))
+
+    def get_compliance_status(self, framework: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT status, last_updated FROM compliance_status WHERE framework = ?",
+                (framework,)
+            )
+            result = cursor.fetchone()
+            return {"status": result[0], "last_updated": result[1]} if result else None
+
+    def get_policy(self, policy_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT framework, content, version FROM policies WHERE policy_id = ?",
+                (policy_id,)
+            )
+            result = cursor.fetchone()
+            return {"framework": result[0], "content": result[1], "version": result[2]} if result else None
+
+    def get_risk(self, risk_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT description, severity FROM risk_register WHERE risk_id = ?",
+                (risk_id,)
+            )
+            result = cursor.fetchone()
+            return {"description": result[0], "severity": result[1]} if result else None
+
+    
