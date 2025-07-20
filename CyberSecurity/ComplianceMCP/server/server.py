@@ -307,3 +307,40 @@ async def get_encryption_standards() -> str:
     """Retrieve encryption standards for compliance"""
     return "Standards: AES-256, RSA-2048, TLS 1.3"
 
+# Tools
+@mcp.tool(title="Check Compliance Status")
+async def check_compliance_status(framework: str, ctx: Context) -> ComplianceStatus:
+    """Check compliance status for a framework using Eramba API"""
+    http_session = ctx.request_context.lifespan_context["http_session"]
+    db = ctx.request_context.lifespan_context["db"]
+    eramba_api_key = os.getenv("ERAMBA_API_KEY")
+    
+    if not eramba_api_key:
+        logger.warning("ERAMBA_API_KEY not set, using local data")
+        status = db.get_compliance_status(framework)
+        return ComplianceStatus(
+            framework=framework,
+            status=status["status"] if status else "Pending",
+            last_updated=status["last_updated"] if status else str(datetime.utcnow())
+        )
+    
+    try:
+        async with http_session.get(
+            f"http://localhost:8080/api/compliance/{framework}",
+            headers={"X-API-Key": eramba_api_key}
+        ) as response:
+            data = await response.json()
+            status = data.get("status", "Pending")
+            db.log_action(f"Checked {framework} compliance: {status}")
+            return ComplianceStatus(
+                framework=framework,
+                status=status,
+                last_updated=data.get("last_updated", str(datetime.utcnow()))
+            )
+    except Exception as e:
+        logger.error(f"Eramba API error: {str(e)}")
+        return ComplianceStatus(
+            framework=framework,
+            status=f"Error: {str(e)}",
+            last_updated=str(datetime.utcnow())
+        )
