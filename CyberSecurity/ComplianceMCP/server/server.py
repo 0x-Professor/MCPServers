@@ -32,6 +32,26 @@ db_instance = None
 http_session_instance = None
 shodan_api_instance = None
 
+# Initialize database at module level
+def init_database():
+    global db_instance
+    try:
+        db_instance = ComplianceDB("server/compliance.db")
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {str(e)}")
+        # Create a minimal database instance that won't fail
+        class FallbackDB:
+            def log_action(self, *args, **kwargs):
+                pass
+            def get_compliance_status(self, framework):
+                return {"status": "Unknown", "last_updated": str(datetime.utcnow())}
+            def get_policy(self, policy_id):
+                return None
+            def get_vendor_assessment(self, vendor_id):
+                return None
+        db_instance = FallbackDB()
+
 # Database setup
 class ComplianceDB:
     def __init__(self, db_path: str):
@@ -177,19 +197,34 @@ class ComplianceDB:
 # Lifespan management
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[None]:
-    global db_instance, http_session_instance, shodan_api_instance
+    global http_session_instance, shodan_api_instance
     
-    db_instance = ComplianceDB("server/compliance.db")
+    # Initialize database if not already done
+    if db_instance is None:
+        init_database()
+        
+    # Initialize HTTP session
     http_session_instance = aiohttp.ClientSession()
+    
+    # Initialize Shodan if API key is available
     shodan_api_key = os.getenv("SHODAN_API_KEY")
-    shodan_api_instance = shodan.Shodan(shodan_api_key) if shodan_api_key else None
+    if shodan_api_key:
+        try:
+            shodan_api_instance = shodan.Shodan(shodan_api_key)
+            logger.info("Shodan API initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Shodan: {str(e)}")
+            shodan_api_instance = None
     
     logger.info("Server started with dependencies initialized")
-    yield
-    
-    if http_session_instance:
-        await http_session_instance.close()
-    logger.info("Shutting down server")
+    try:
+        yield
+    finally:
+        # Cleanup
+        if http_session_instance:
+            await http_session_instance.close()
+            logger.info("HTTP session closed")
+        logger.info("Shutting down server")
 
 # Set lifespan
 mcp.lifespan = app_lifespan
@@ -329,44 +364,57 @@ async def check_compliance_status(framework: str, ctx: Context) -> ComplianceSta
     """Check compliance status for a framework using Eramba API"""
     global db_instance, http_session_instance
     
-    if not db_instance:
-        return ComplianceStatus(
-            framework=framework,
-            status="Error: Database not initialized",
-            last_updated=str(datetime.utcnow())
-        )
+    # Ensure database is initialized
+    if db_instance is None:
+        init_database()
     
+    # Get current timestamp for consistent timing
+    current_time = str(datetime.utcnow())
+    
+    # Try to use Eramba API if available
     eramba_api_key = os.getenv("ERAMBA_API_KEY")
     
-    if not eramba_api_key or not http_session_instance:
-        logger.warning("ERAMBA_API_KEY not set or HTTP session not available, using local data")
-        status = db_instance.get_compliance_status(framework)
-        return ComplianceStatus(
-            framework=framework,
-            status=status["status"] if status else "Pending",
-            last_updated=status["last_updated"] if status else str(datetime.utcnow())
-        )
+    if eramba_api_key and http_session_instance:
+        try:
+            async with http_session_instance.get(
+                f"http://localhost:8080/api/compliance/{framework}",
+                headers={"X-API-Key": eramba_api_key},
+                timeout=aiohttp.ClientTimeout(total=5)  # 5 second timeout
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    status = data.get("status", "Pending")
+                    if db_instance:
+                        db_instance.log_action(f"Checked {framework} compliance via API: {status}")
+                    return ComplianceStatus(
+                        framework=framework,
+                        status=status,
+                        last_updated=data.get("last_updated", current_time)
+                    )
+                else:
+                    logger.warning(f"Eramba API returned status {response.status}")
+        except Exception as e:
+            logger.error(f"Eramba API error: {str(e)}")
     
-    try:
-        async with http_session_instance.get(
-            f"http://localhost:8080/api/compliance/{framework}",
-            headers={"X-API-Key": eramba_api_key}
-        ) as response:
-            data = await response.json()
-            status = data.get("status", "Pending")
-            db_instance.log_action(f"Checked {framework} compliance: {status}")
-            return ComplianceStatus(
-                framework=framework,
-                status=status,
-                last_updated=data.get("last_updated", str(datetime.utcnow()))
-            )
-    except Exception as e:
-        logger.error(f"Eramba API error: {str(e)}")
-        return ComplianceStatus(
-            framework=framework,
-            status=f"Error: {str(e)}",
-            last_updated=str(datetime.utcnow())
-        )
+    # Fall back to local database if API fails or not available
+    if db_instance:
+        try:
+            status = db_instance.get_compliance_status(framework)
+            if status and "status" in status and "last_updated" in status:
+                return ComplianceStatus(
+                    framework=framework,
+                    status=status["status"],
+                    last_updated=status["last_updated"]
+                )
+        except Exception as e:
+            logger.error(f"Database error: {str(e)}")
+    
+    # Final fallback if everything else fails
+    return ComplianceStatus(
+        framework=framework,
+        status="Unknown (fallback)",
+        last_updated=current_time
+    )
 
 @mcp.tool(title="Generate Compliance Report")
 async def generate_compliance_report(framework: str, ctx: Context) -> str:
@@ -711,6 +759,9 @@ def encryption_review(system: str) -> str:
 def compliance_gap_analysis(framework: str) -> str:
     """Generate a prompt for compliance gap analysis"""
     return f"Perform a gap analysis for {framework} compliance."
+
+# Initialize database when module is imported
+init_database()
 
 if __name__ == "__main__":
     mcp.run()
