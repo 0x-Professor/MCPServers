@@ -131,4 +131,52 @@ class ComplianceDB:
             result = cursor.fetchone()
             return {"description": result[0], "severity": result[1]} if result else None
 
-    
+    def get_incident(self, incident_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT description, status FROM incidents WHERE incident_id = ?",
+                (incident_id,)
+            )
+            result = cursor.fetchone()
+            return {"description": result[0], "status": result[1]} if result else None
+
+    def get_training_records(self, employee_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT training_name, completion_date FROM training_records WHERE employee_id = ?",
+                (employee_id,)
+            )
+            result = cursor.fetchone()
+            return {"training_name": result[0], "completion_date": result[1]} if result else None
+
+    def get_vendor_assessment(self, vendor_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT name, compliance_status FROM vendor_assessments WHERE vendor_id = ?",
+                (vendor_id,)
+            )
+            result = cursor.fetchone()
+            return {"name": result[0], "compliance_status": result[1]} if result else None
+
+    def get_access_review(self, user_id: str) -> Optional[Dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT system, access_level FROM access_reviews WHERE user_id = ?",
+                (user_id,)
+            )
+            result = cursor.fetchone()
+            return {"system": result[0], "access_level": result[1]} if result else None 
+
+# Lifespan management
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> AsyncIterator[Dict]:
+    db = ComplianceDB("server/compliance.db")
+    async with aiohttp.ClientSession() as session:
+        shodan_api_key = os.getenv("SHODAN_API_KEY")
+        shodan_api = shodan.Shodan(shodan_api_key) if shodan_api_key else None
+        yield {"db": db, "http_session": session, "shodan": shodan_api}
+    logger.info("Shutting down server")
+
+# set lifespan
+mcp.lifespan = app_lifespan
+ 
