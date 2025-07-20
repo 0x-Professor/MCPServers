@@ -4,8 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Unizo API](https://img.shields.io/badge/Unizo-API-ff69b4)](https://docs.unizo.ai/)
+[![UV](https://img.shields.io/badge/UV-Enabled-9cf)](https://github.com/astral-sh/uv)
 
 ComplianceMCP is a Model Context Protocol (MCP) server designed to provide comprehensive compliance monitoring and reporting for various security frameworks including GDPR, HIPAA, PCI-DSS, and ISO27001. It integrates with Unizo's EDR & XDR MCP API to deliver real-time compliance status and security insights.
+
+> **Note**: This project uses [UV](https://github.com/astral-sh/uv) for package management and environment management, providing faster and more reliable dependency resolution.
 
 ## ✨ Features
 
@@ -21,31 +24,56 @@ ComplianceMCP is a Model Context Protocol (MCP) server designed to provide compr
 
 - Python 3.8 or higher
 - Unizo API key
-- `pip` package manager
+- [UV](https://github.com/astral-sh/uv) (recommended) or `pip`
 
-### Installation
+### Installation with UV (Recommended)
 
-1. Clone the repository:
+1. Install UV (if not already installed):
    ```bash
-   git clone https://github.com/yourusername/ComplianceMCP.git
-   cd ComplianceMCP
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+   Or using pip:
+   ```bash
+   pip install uv
    ```
 
-2. Create and activate a virtual environment (recommended):
+2. Clone the repository:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
+   git clone https://github.com/0x-Professor/MCPServers.git 
+   cd MCPServers\CyberSecurity\ComplianceMCP
    ```
 
-3. Install dependencies:
+3. Create and activate a virtual environment with UV:
    ```bash
-   pip install -r requirements.txt
+   uv venv .venv
+   # On Windows:
+   .venv\\Scripts\\activate
+   # On Unix/macOS:
+   source .venv/bin/activate
    ```
 
-4. Create a `.env` file and add your Unizo API key:
+4. Install dependencies with UV:
+   ```bash
+   uv pip install -r requirements.txt
+   ```
+
+5. Create a `.env` file and add your Unizo API key:
    ```env
    UNIZO_API_KEY=your_api_key_here
    ```
+
+### Installation with pip (Alternative)
+
+If you prefer to use pip instead of UV:
+
+```bash
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: .\\venv\\Scripts\\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
 
 ## 🛠️ Configuration
 
@@ -59,13 +87,126 @@ ComplianceMCP is a Model Context Protocol (MCP) server designed to provide compr
 
 ## 🚦 Running the Server
 
-Start the MCP server:
+### With UV (Recommended)
 
 ```bash
 uv run mcp dev server/server.py
 ```
 
+### With Python Directly
+
+```bash
+python -m mcp server/server.py
+```
+
 The server will be available at `http://localhost:6274` by default.
+
+## 🛠️ Tools and Resources
+
+### Available Tools
+
+1. **Check Compliance Status**
+   - **Endpoint**: `GET /compliance/{framework}`
+   - **Description**: Check compliance status for a specific framework
+   - **Frameworks Supported**: GDPR, HIPAA, PCI-DSS, ISO27001
+   - **Example**:
+     ```bash
+     curl -X GET "http://localhost:6274/compliance/GDPR"
+     ```
+
+2. **Get Policy Document**
+   - **Endpoint**: `GET /policy/{policy_id}`
+   - **Description**: Retrieve a specific policy document
+   - **Example**:
+     ```bash
+     curl -X GET "http://localhost:6274/policy/gdpr_privacy_policy"
+     ```
+
+3. **Get Vendor Profile**
+   - **Endpoint**: `GET /vendor/{vendor_id}`
+   - **Description**: Get compliance information for a specific vendor
+   - **Example**:
+     ```bash
+     curl -X GET "http://localhost:6274/vendor/aws"
+     ```
+
+### Resource Endpoints
+
+1. **List All Policies**
+   ```http
+   GET /policies
+   ```
+
+2. **Get Compliance Report**
+   ```http
+   GET /report/{framework}
+   ```
+
+3. **Check System Health**
+   ```http
+   GET /health
+   ```
+
+## 📝 Prompts and Usage Examples
+
+### Common Workflows
+
+1. **Check GDPR Compliance**
+   ```bash
+   curl -X GET "http://localhost:6274/compliance/GDPR"
+   ```
+
+2. **Generate Compliance Report**
+   ```bash
+   curl -X GET "http://localhost:6274/report/HIPAA" -o hipaa_report.pdf
+   ```
+
+3. **Monitor Compliance Status**
+   ```bash
+   # Check status every 5 minutes
+   watch -n 300 'curl -s http://localhost:6274/health | jq .'
+   ```
+
+### API Response Format
+
+All API responses follow this standard format:
+
+```json
+{
+    "status": "success|error",
+    "data": {},
+    "message": "Descriptive message",
+    "timestamp": "2025-07-20T09:30:00Z"
+}
+```
+
+## 🔄 UV-Specific Commands
+
+### Managing Dependencies
+
+```bash
+# Add a new package
+uv pip install package_name
+
+# Update all dependencies
+uv pip compile --upgrade
+
+# Freeze current dependencies
+uv pip freeze > requirements.txt
+```
+
+### Running Tests
+
+```bash
+uv run pytest tests/
+```
+
+### Linting
+
+```bash
+uv run black .
+uv run flake8
+```
 
 ## 📚 API Documentation
 
@@ -114,10 +255,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📧 Contact
 
-For questions or support, please contact [your-email@example.com](mailto:your-email@example.com)
+For questions or support, please contact [mr.mazharsaeed790@gmail.com](mailto:mr.mazharsaeed790@gmail.com)
 
 ---
 
 <div align="center">
-  Made with ❤️ by Your Name
+  Made with ❤️ by Mazhar Saeed aka Professor
 </div>
