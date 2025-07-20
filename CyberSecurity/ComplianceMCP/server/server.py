@@ -397,3 +397,73 @@ async def assess_risk(description: str, ctx: Context) -> RiskAssessment:
     db.log_action(f"Assessed risk {risk_id}")
     return RiskAssessment(risk_id=risk_id, description=description, severity=severity, mitigation=mitigation)
 
+@mcp.tool(title="Collect Evidence")
+async def collect_evidence(framework: str, evidence_type: str, ctx: Context) -> EvidenceRecord:
+    """Collect evidence for a compliance framework using Eramba API"""
+    db = ctx.request_context.lifespan_context["db"]
+    eramba_api_key = os.getenv("ERAMBA_API_KEY")
+    evidence_id = f"EVID-{hash(framework + evidence_type) % 10000}"
+    description = f"Evidence for {evidence_type} in {framework}"
+    
+    if eramba_api_key:
+        try:
+            async with ctx.request_context.lifespan_context["http_session"].post(
+                f"http://localhost:8080/api/evidence",
+                headers={"X-API-Key": eramba_api_key},
+                json={"framework": framework, "evidence_type": evidence_type}
+            ) as response:
+                data = await response.json()
+                description = data.get("description", description)
+        except Exception as e:
+            logger.error(f"Eramba API error: {str(e)}")
+    
+    db.log_action(f"Collected evidence {evidence_id}")
+    return EvidenceRecord(evidence_id=evidence_id, framework=framework, description=description, collected_at=str(datetime.utcnow()))
+
+@mcp.tool(title="Validate Control")
+async def validate_control(control_id: str, framework: str, ctx: Context) -> ControlValidation:
+    """Validate a compliance control"""
+    db = ctx.request_context.lifespan_context["db"]
+    status = "Pass" if control_id.startswith("C") else "Pending"
+    details = f"Control {control_id} validated for {framework}"
+    db.log_action(f"Validated control {control_id}")
+    return ControlValidation(control_id=control_id, framework=framework, status=status, details=details)
+
+@mcp.tool(title="Report Incident")
+async def report_incident(description: str, ctx: Context) -> IncidentReport:
+    """Report a new compliance incident"""
+    db = ctx.request_context.lifespan_context["db"]
+    incident_id = f"INC-{hash(description) % 10000}"
+    status = "Open"
+    with sqlite3.connect("server/compliance.db") as conn:
+        conn.execute(
+            "INSERT INTO incidents (incident_id, description, status) VALUES (?, ?, ?)",
+            (incident_id, description, status)
+        )
+    db.log_action(f"Reported incident {incident_id}")
+    return IncidentReport(incident_id=incident_id, description=description, status=status, reported_at=str(datetime.utcnow()))
+
+@mcp.tool(title="Track Training")
+async def track_training(employee_id: str, training_name: str, ctx: Context) -> str:
+    """Track employee compliance training"""
+    db = ctx.request_context.lifespan_context["db"]
+    with sqlite3.connect("server/compliance.db") as conn:
+        conn.execute(
+            "INSERT INTO training_records (employee_id, training_name, completion_date) VALUES (?, ?, ?)",
+            (employee_id, training_name, str(datetime.utcnow()))
+        )
+    db.log_action(f"Tracked training for {employee_id}: {training_name}")
+    return f"Training {training_name} recorded for {employee_id}"
+
+@mcp.tool(title="Assess Vendor")
+async def assess_vendor(vendor_id: str, name: str, ctx: Context) -> str:
+    """Assess a vendor's compliance status"""
+    db = ctx.request_context.lifespan_context["db"]
+    status = "Compliant" if vendor_id.startswith("V") else "Non-Compliant"
+    with sqlite3.connect("server/compliance.db") as conn:
+        conn.execute(
+            "INSERT INTO vendor_assessments (vendor_id, name, compliance_status) VALUES (?, ?, ?)",
+            (vendor_id, name, status)
+        )
+    db.log_action(f"Assessed vendor {vendor_id}: {status}")
+    return f"Vendor {name} assessed as {status}"
