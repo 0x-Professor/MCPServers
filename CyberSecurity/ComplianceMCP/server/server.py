@@ -578,3 +578,5 @@ def policy_review(policy_id: str, style: str = "formal") -> str:
         "summary": "Please provide a concise summary of the policy"
     }
     return f"{styles.get(style, styles['formal'])} with ID {policy_id}."
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http")
