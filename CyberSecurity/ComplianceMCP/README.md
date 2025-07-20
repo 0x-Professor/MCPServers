@@ -81,7 +81,7 @@ pip install -r requirements.txt
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `UNIZO_API_KEY` | Yes | Your Unizo API key | `7vbUh-dcF6Cpb_UxDXCjUGc6wWXhJxgH` |
+| `UNIZO_API_KEY` | Yes | Your Unizo API key | `wroifnwwoifoiwnfwnfiw-23` |
 | `DATABASE_URL` | No | Database connection URL (default: SQLite) | `sqlite:///compliance.db` |
 | `LOG_LEVEL` | No | Logging level (default: INFO) | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
