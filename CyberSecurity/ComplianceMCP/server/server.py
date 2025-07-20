@@ -25,3 +25,78 @@ mcp = FastMCP(
     "ComplianceManager",
     stateless_http=True,
 )
+
+# Database setup
+class ComplianceDB:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.init_db()
+
+    def init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS compliance_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    framework TEXT,
+                    status TEXT,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS policies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    policy_id TEXT,
+                    framework TEXT,
+                    content TEXT,
+                    version INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS risk_register (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    risk_id TEXT,
+                    description TEXT,
+                    severity TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    incident_id TEXT,
+                    description TEXT,
+                    status TEXT,
+                    reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS training_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    employee_id TEXT,
+                    training_name TEXT,
+                    completion_date TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS vendor_assessments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vendor_id TEXT,
+                    name TEXT,
+                    compliance_status TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS access_reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT,
+                    system TEXT,
+                    access_level TEXT,
+                    review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
