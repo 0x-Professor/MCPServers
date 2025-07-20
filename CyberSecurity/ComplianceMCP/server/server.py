@@ -381,4 +381,19 @@ async def suggest_policy_update(framework: str, issue: str) -> PolicyUpdate:
     suggestion = suggestions.get(framework, {}).get(issue, PolicyUpdate(policy_id="UNKNOWN", suggestion="No suggestion available", severity="Low"))
     ctx.request_context.lifespan_context["db"].log_action(f"Suggested policy update for {framework}: {issue}")
     return suggestion
-    
+
+@mcp.tool(title="Assess Risk")
+async def assess_risk(description: str, ctx: Context) -> RiskAssessment:
+    """Assess a new risk and assign severity"""
+    db = ctx.request_context.lifespan_context["db"]
+    risk_id = f"RISK-{hash(description) % 10000}"
+    severity = "High" if "critical" in description.lower() else "Medium"
+    mitigation = "Implement controls and monitor" if severity == "High" else "Review and document"
+    with sqlite3.connect("server/compliance.db") as conn:
+        conn.execute(
+            "INSERT INTO risk_register (risk_id, description, severity) VALUES (?, ?, ?)",
+            (risk_id, description, severity)
+        )
+    db.log_action(f"Assessed risk {risk_id}")
+    return RiskAssessment(risk_id=risk_id, description=description, severity=severity, mitigation=mitigation)
+
