@@ -210,6 +210,10 @@ uv run flake8
 
 ## 📚 API Documentation
 
+For detailed API documentation, including all available endpoints, request/response formats, and examples, please see the [API Documentation](API_DOCS.md).
+
+### Key API Features
+
 ### Check Compliance Status
 
 ```http
