@@ -11,8 +11,12 @@ from mcp.types import TextContent
 import os
 from dotenv import load_dotenv
 import shodan
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
+import random
+import aiohttp
+import json
+from typing import Dict, Optional, Any, List
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -361,8 +365,8 @@ async def get_encryption_standards() -> str:
 # Tools
 @mcp.tool(title="Check Compliance Status")
 async def check_compliance_status(framework: str, ctx: Context) -> ComplianceStatus:
-    """Check compliance status for a framework using Eramba API"""
-    global db_instance, http_session_instance
+    """Check compliance status for a framework using Unizo API or fallback methods"""
+    global db_instance, http_session_instance, mock_compliance, unizo_client
     
     # Ensure database is initialized
     if db_instance is None:
@@ -371,48 +375,35 @@ async def check_compliance_status(framework: str, ctx: Context) -> ComplianceSta
     # Get current timestamp for consistent timing
     current_time = str(datetime.utcnow())
     
-    # Try to use Eramba API if available
-    eramba_api_key = os.getenv("ERAMBA_API_KEY")
-    
-    if eramba_api_key and http_session_instance:
+    # Try to use Unizo API if available
+    if unizo_client:
         try:
-            async with http_session_instance.get(
-                f"http://localhost:8080/api/compliance/{framework}",
-                headers={"X-API-Key": eramba_api_key},
-                timeout=aiohttp.ClientTimeout(total=5)  # 5 second timeout
-            ) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    status = data.get("status", "Pending")
-                    if db_instance:
-                        db_instance.log_action(f"Checked {framework} compliance via API: {status}")
-                    return ComplianceStatus(
-                        framework=framework,
-                        status=status,
-                        last_updated=data.get("last_updated", current_time)
+            async with unizo_client as client:
+                compliance_data = await client.get_compliance_status(framework)
+                
+                # Log the action
+                if db_instance:
+                    db_instance.log_action(
+                        f"Checked {framework} compliance via Unizo API: {compliance_data['status']}"
                     )
-                else:
-                    logger.warning(f"Eramba API returned status {response.status}")
-        except Exception as e:
-            logger.error(f"Eramba API error: {str(e)}")
-    
-    # Fall back to local database if API fails or not available
-    if db_instance:
-        try:
-            status = db_instance.get_compliance_status(framework)
-            if status and "status" in status and "last_updated" in status:
+                
                 return ComplianceStatus(
                     framework=framework,
-                    status=status["status"],
-                    last_updated=status["last_updated"]
+                    status=compliance_data["status"],
+                    last_updated=compliance_data["last_updated"]
                 )
+                
         except Exception as e:
-            logger.error(f"Database error: {str(e)}")
+            logger.error(f"Unizo API error: {str(e)}")
     
-    # Final fallback if everything else fails
+    # If we reached here, the Unizo API call failed
+    error_msg = "Failed to fetch compliance status from Unizo API"
+    logger.error(error_msg)
+    
+    # Return an error status instead of falling back to mock data
     return ComplianceStatus(
         framework=framework,
-        status="Unknown (fallback)",
+        status=f"Error: {error_msg}",
         last_updated=current_time
     )
 
@@ -760,8 +751,197 @@ def compliance_gap_analysis(framework: str) -> str:
     """Generate a prompt for compliance gap analysis"""
     return f"Perform a gap analysis for {framework} compliance."
 
-# Initialize database when module is imported
+class MockComplianceService:
+    """Mock service to provide compliance status when Eramba API is not available"""
+    
+    def __init__(self):
+        self.framework_statuses = {
+            "GDPR": ["Compliant", "Non-Compliant", "In Progress", "Not Started"],
+            "PCI-DSS": ["Compliant", "Non-Compliant", "In Progress", "Not Started"],
+            "HIPAA": ["Compliant", "Non-Compliant", "In Progress", "Not Started"],
+            "ISO27001": ["Compliant", "Non-Compliant", "In Progress", "Not Started"]
+        }
+        
+    def get_status(self, framework: str) -> Dict[str, str]:
+        """Get a realistic mock status for a compliance framework"""
+        statuses = self.framework_statuses.get(framework, ["Unknown"])
+        status = random.choice(statuses)
+        
+        # Make status more likely to be compliant for demo purposes
+        if random.random() > 0.7:  # 30% chance to be non-compliant
+            status = "Non-Compliant"
+        else:
+            status = "Compliant"
+            
+        return {
+            "status": status,
+            "last_updated": (datetime.utcnow() - timedelta(days=random.randint(0, 30))).isoformat(),
+            "controls_passed": random.randint(80, 100),
+            "controls_failed": random.randint(0, 5),
+            "controls_total": 100
+        }
+
+class UnizoClient:
+    """Client for interacting with Unizo EDR & XDR MCP API"""
+    
+    BASE_URL = "http://api.unizo.ai/mcp/edr&xdr"
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.session = None
+    
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession(
+            headers={"apikey": self.api_key},
+            timeout=aiohttp.ClientTimeout(total=10)
+        )
+        return self
+    
+    async def __aexit__(self, exc_type, exc, tb):
+        if self.session:
+            await self.session.close()
+    
+    async def list_alerts(
+        self,
+        integration: str = "crowdstrike",  # Default to CrowdStrike, can be changed as needed
+        severity: str = None,
+        status: str = None,
+        time_range: str = "24h",
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """List security alerts from Unizo EDR & XDR MCP"""
+        params = {
+            "integration": integration,
+            "time_range": time_range,
+            "limit": limit
+        }
+        if severity:
+            params["severity"] = severity
+        if status:
+            params["status"] = status
+            
+        try:
+            async with self.session.get(
+                f"{self.BASE_URL}/list_alerts",
+                params=params
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch alerts from Unizo: {str(e)}")
+            return {"alerts": [], "error": str(e)}
+    
+    async def get_compliance_status(
+        self,
+        framework: str,
+        integration: str = "crowdstrike"
+    ) -> Dict[str, Any]:
+        """Get compliance status based on security alerts"""
+        # Map framework to alert types based on common compliance requirements
+        alert_types = {
+            "GDPR": [
+                "data_leak", "unauthorized_access", "data_breach", 
+                "privacy_violation", "data_subject_request"
+            ],
+            "PCI-DSS": [
+                "credit_card_leak", "unauthorized_access", "malware", 
+                "card_skimming", "pos_compromise"
+            ],
+            "HIPAA": [
+                "phi_leak", "unauthorized_access", "medical_record_breach",
+                "healthcare_fraud", "patient_data_exposure"
+            ],
+            "ISO27001": [
+                "data_breach", "unauthorized_access", "system_compromise",
+                "insider_threat", "security_control_failure"
+            ]
+        }
+        
+        # Get all relevant alerts for the framework
+        alerts = []
+        try:
+            # First try to get framework-specific alerts
+            result = await self.list_alerts(
+                integration=integration,
+                status="new,in_progress",
+                limit=100  # Get more alerts for better accuracy
+            )
+            
+            if "alerts" in result:
+                # Filter alerts that are relevant to this framework
+                relevant_alerts = []
+                for alert in result["alerts"]:
+                    alert_type = alert.get("alert_type", "").lower()
+                    framework_alerts = alert_types.get(framework, [])
+                    
+                    # Check if this alert is relevant to the framework
+                    if any(alert_type.startswith(t) for t in framework_alerts):
+                        relevant_alerts.append(alert)
+                
+                alerts = relevant_alerts
+                
+                # If no framework-specific alerts found, include all high/critical alerts
+                if not alerts:
+                    alerts = [a for a in result["alerts"] 
+                             if a.get("severity", "").lower() in ["high", "critical"]]
+        except Exception as e:
+            logger.error(f"Error fetching alerts: {str(e)}")
+            raise Exception(f"Failed to fetch compliance data: {str(e)}")
+        
+        # Determine compliance status based on alerts
+        if not alerts:
+            return {
+                "status": "Compliant",
+                "last_updated": datetime.utcnow().isoformat(),
+                "alerts_count": 0,
+                "source": "unizo"
+            }
+        
+        # We've already filtered relevant alerts during the initial fetch
+        relevant_alerts = alerts
+        
+        if relevant_alerts:
+            latest_alert_time = max(
+                a.get("timestamp", datetime.utcnow().isoformat()) 
+                for a in relevant_alerts
+            )
+            
+            # Get unique alert types for details
+            alert_types_found = list(set(
+                a.get("alert_type", "unknown").lower() 
+                for a in relevant_alerts
+            ))
+            
+            return {
+                "status": "Non-Compliant",
+                "last_updated": latest_alert_time,
+                "alerts_count": len(relevant_alerts),
+                "source": "unizo",
+                "details": {
+                    "alert_types": alert_types_found,
+                    "severity": max(
+                        a.get("severity", "medium").lower() 
+                        for a in relevant_alerts
+                    ),
+                    "recommendation": "Review and remediate the identified security alerts"
+                }
+            }
+        
+        return {
+            "status": "Compliant",
+            "last_updated": datetime.utcnow().isoformat(),
+            "alerts_count": 0,
+            "source": "unizo",
+            "details": "No compliance violations detected"
+        }
+
+# Initialize services
 init_database()
+mock_compliance = MockComplianceService()
+
+# Initialize Unizo client if API key is available
+UNIZO_API_KEY = ""  # Should be moved to environment variable in production
+unizo_client = UnizoClient(UNIZO_API_KEY) if UNIZO_API_KEY else None
 
 if __name__ == "__main__":
     mcp.run()
