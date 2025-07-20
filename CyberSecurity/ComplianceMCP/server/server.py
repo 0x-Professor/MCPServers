@@ -533,3 +533,33 @@ async def update_policy_version(policy_id: str, content: str, ctx: Context) -> s
     db.log_action(f"Updated policy {policy_id} to version {version}")
     return f"Policy {policy_id} updated to version {version}"
 
+@mcp.tool(title="Simulate Data Breach")
+async def simulate_data_breach(system: str, ctx: Context) -> str:
+    """Simulate a data breach scenario"""
+    db = ctx.request_context.lifespan_context["db"]
+    breach_id = f"BRCH-{uuid.uuid4().hex[:8]}"
+    db.log_action(f"Simulated data breach {breach_id} on {system}")
+    return f"Simulated data breach {breach_id} on {system}: Review incident response plan"
+
+@mcp.tool(title="Review Access Controls")
+async def review_access_controls(user_id: str, system: str, ctx: Context) -> AccessReview:
+    """Review access controls for a user and system"""
+    db = ctx.request_context.lifespan_context["db"]
+    access_level = "Admin" if user_id.startswith("A") else "Read-Only"
+    with sqlite3.connect("server/compliance.db") as conn:
+        conn.execute(
+            "INSERT INTO access_reviews (user_id, system, access_level, review_date) VALUES (?, ?, ?, ?)",
+            (user_id, system, access_level, str(datetime.utcnow()))
+        )
+    db.log_action(f"Reviewed access for {user_id} on {system}")
+    return AccessReview(user_id=user_id, system=system, access_level=access_level, review_date=str(datetime.utcnow()))
+
+@mcp.tool(title="Generate Audit Plan")
+async def generate_audit_plan(framework: str, ctx: Context) -> str:
+    """Generate an audit plan for a framework"""
+    db = ctx.request_context.lifespan_context["db"]
+    plan = f"Audit Plan for {framework}\n"
+    plan += "1. Review compliance status\n2. Collect evidence\n3. Validate controls\n4. Assess risks"
+    db.log_action(f"Generated audit plan for {framework}")
+    return plan
+
