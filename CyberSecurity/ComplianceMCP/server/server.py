@@ -940,7 +940,7 @@ init_database()
 mock_compliance = MockComplianceService()
 
 # Initialize Unizo client if API key is available
-UNIZO_API_KEY = ""  # Should be moved to environment variable in production
+UNIZO_API_KEY = os.getenv("UNIZO_API_KEY")  # Should be moved to environment variable in production
 unizo_client = UnizoClient(UNIZO_API_KEY) if UNIZO_API_KEY else None
 
 if __name__ == "__main__":
