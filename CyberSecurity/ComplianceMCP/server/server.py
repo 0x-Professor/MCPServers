@@ -309,10 +309,10 @@ async def get_encryption_standards() -> str:
 
 # Tools
 @mcp.tool(title="Check Compliance Status")
-async def check_compliance_status(framework: str, ctx: Context) -> ComplianceStatus:
+async def check_compliance_status(framework: str) -> ComplianceStatus:
     """Check compliance status for a framework using Eramba API"""
-    http_session = ctx.request_context.lifespan_context["http_session"]
-    db = ctx.request_context.lifespan_context["db"]
+    http_session = mcp.request_context.lifespan_context["http_session"]
+    db = mcp.request_context.lifespan_context["db"]
     eramba_api_key = os.getenv("ERAMBA_API_KEY")
     
     if not eramba_api_key:
@@ -346,9 +346,9 @@ async def check_compliance_status(framework: str, ctx: Context) -> ComplianceSta
         )
 
 @mcp.tool(title="Generate Compliance Report")
-async def generate_compliance_report(framework: str, ctx: Context) -> str:
+async def generate_compliance_report(framework: str) -> str:
     """Generate a compliance report for a framework"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     status = db.get_compliance_status(framework)
     report = f"Compliance Report for {framework}\n"
     report += f"Status: {status['status'] if status else 'Unknown'}\n"
@@ -379,13 +379,13 @@ async def suggest_policy_update(framework: str, issue: str) -> PolicyUpdate:
         }
     }
     suggestion = suggestions.get(framework, {}).get(issue, PolicyUpdate(policy_id="UNKNOWN", suggestion="No suggestion available", severity="Low"))
-    ctx.request_context.lifespan_context["db"].log_action(f"Suggested policy update for {framework}: {issue}")
+    mcp.request_context.lifespan_context["db"].log_action(f"Suggested policy update for {framework}: {issue}")
     return suggestion
 
 @mcp.tool(title="Assess Risk")
-async def assess_risk(description: str, ctx: Context) -> RiskAssessment:
+async def assess_risk(description: str) -> RiskAssessment:
     """Assess a new risk and assign severity"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     risk_id = f"RISK-{hash(description) % 10000}"
     severity = "High" if "critical" in description.lower() else "Medium"
     mitigation = "Implement controls and monitor" if severity == "High" else "Review and document"
@@ -398,16 +398,16 @@ async def assess_risk(description: str, ctx: Context) -> RiskAssessment:
     return RiskAssessment(risk_id=risk_id, description=description, severity=severity, mitigation=mitigation)
 
 @mcp.tool(title="Collect Evidence")
-async def collect_evidence(framework: str, evidence_type: str, ctx: Context) -> EvidenceRecord:
+async def collect_evidence(framework: str, evidence_type: str) -> EvidenceRecord:
     """Collect evidence for a compliance framework using Eramba API"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     eramba_api_key = os.getenv("ERAMBA_API_KEY")
     evidence_id = f"EVID-{hash(framework + evidence_type) % 10000}"
     description = f"Evidence for {evidence_type} in {framework}"
     
     if eramba_api_key:
         try:
-            async with ctx.request_context.lifespan_context["http_session"].post(
+            async with mcp.request_context.lifespan_context["http_session"].post(
                 f"http://localhost:8080/api/evidence",
                 headers={"X-API-Key": eramba_api_key},
                 json={"framework": framework, "evidence_type": evidence_type}
@@ -421,9 +421,9 @@ async def collect_evidence(framework: str, evidence_type: str, ctx: Context) -> 
     return EvidenceRecord(evidence_id=evidence_id, framework=framework, description=description, collected_at=str(datetime.utcnow()))
 
 @mcp.tool(title="Validate Control")
-async def validate_control(control_id: str, framework: str, ctx: Context) -> ControlValidation:
+async def validate_control(control_id: str, framework: str) -> ControlValidation:
     """Validate a compliance control"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     status = "Pass" if control_id.startswith("C") else "Pending"
     details = f"Control {control_id} validated for {framework}"
     db.log_action(f"Validated control {control_id}")
@@ -491,38 +491,38 @@ async def validate_encryption(system: str, ctx: Context) -> str:
     ctx.request_context.lifespan_context["db"].log_action(f"Validated encryption for {system}: {encryption}")
     return encryption
 @mcp.tool(title="Generate Compliance Dashboard")
-async def generate_compliance_dashboard(ctx: Context) -> str:
+async def generate_compliance_dashboard() -> str:
     """Generate a compliance dashboard summary"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     frameworks = ["PCI-DSS", "GDPR", "HIPAA", "ISO27001"]
     dashboard = "Compliance Dashboard\n"
-    for framework in frameworks:
+    for framework in frameworks:        
         status = db.get_compliance_status(framework)
         dashboard += f"{framework}: {status['status'] if status else 'Unknown'}\n"
     db.log_action("Generated compliance dashboard")
     return dashboard
 
 @mcp.tool(title="Schedule Penetration Test")
-async def schedule_penetration_test(system: str, ctx: Context) -> str:
+async def schedule_penetration_test(system: str) -> str:
     """Schedule a penetration test for a system"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     test_id = f"PEN-{uuid.uuid4().hex[:8]}"
     db.log_action(f"Scheduled penetration test {test_id} for {system}")
     return f"Penetration test {test_id} scheduled for {system}"
 
 @mcp.tool(title="Perform Gap Analysis")
-async def perform_gap_analysis(framework: str, ctx: Context) -> GapAnalysis:
+async def perform_gap_analysis(framework: str) -> GapAnalysis:
     """Perform a compliance gap analysis"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     gaps = [f"Missing control for {framework} requirement {i}" for i in range(1, 3)]
     recommendations = [f"Implement control for {framework} requirement {i}" for i in range(1, 3)]
     db.log_action(f"Performed gap analysis for {framework}")
     return GapAnalysis(framework=framework, gaps=gaps, recommendations=recommendations)
 
 @mcp.tool(title="Update Policy Version")
-async def update_policy_version(policy_id: str, content: str, ctx: Context) -> str:
+async def update_policy_version(policy_id: str, content: str) -> str:
     """Update a policy with a new version"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     policy = db.get_policy(policy_id)
     version = (policy["version"] + 1) if policy else 1
     with sqlite3.connect("server/compliance.db") as conn:
@@ -534,9 +534,9 @@ async def update_policy_version(policy_id: str, content: str, ctx: Context) -> s
     return f"Policy {policy_id} updated to version {version}"
 
 @mcp.tool(title="Simulate Data Breach")
-async def simulate_data_breach(system: str, ctx: Context) -> str:
+async def simulate_data_breach(system: str) -> str:
     """Simulate a data breach scenario"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     breach_id = f"BRCH-{uuid.uuid4().hex[:8]}"
     db.log_action(f"Simulated data breach {breach_id} on {system}")
     return f"Simulated data breach {breach_id} on {system}: Review incident response plan"
