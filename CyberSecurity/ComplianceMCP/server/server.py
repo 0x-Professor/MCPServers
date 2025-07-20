@@ -179,4 +179,51 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[Dict]:
 
 # set lifespan
 mcp.lifespan = app_lifespan
- 
+
+# Structured output models
+class ComplianceStatus(BaseModel):
+    framework: str = Field(description="Compliance framework (e.g., PCI-DSS, GDPR)")
+    status: str = Field(description="Compliance status (Compliant, Non-Compliant, Pending)")
+    last_updated: str = Field(description="Last update timestamp")
+
+class PolicyUpdate(BaseModel):
+    policy_id: str = Field(description = "Policy Identifier")
+    suggestion: str = Field(description = "Suggested Policy update")
+    severity: str = Field(description= "Severity level (Low, Medium, High)")
+
+class RiskAssessment(BaseModel):
+    risk_id: str = Field(description="Risk identifier")
+    description: str = Field(description="Risk description")
+    severity: str = Field(description="Severity level (Low, Medium, High)")
+    mitigation: str = Field(description="Recommended mitigation")
+
+class EvidenceRecord(BaseModel):
+    evidence_id: str = Field(description= "Evidence Identifier")
+    framework: str = Field(description= "Associated framework")
+    description: str = Field(description= "Evidence description")
+    collected_at: str = Field(description= "Collection timestamp")
+
+class ControlValidation(BaseModel):
+    control_id: str = Field(description="Control identifier")
+    framework: str = Field(description="Associated framework")
+    status: str = Field(description="Validation status (Pass, Fail, Pending)")
+    details: str = Field(description="Validation details")
+
+class IncidentReport(BaseModel):
+    incident_id: str = Field(description="Incident identifier")
+    description: str = Field(description="Incident description")
+    status: str = Field(description="Incident status (Open, Resolved, In Progress)")
+    reported_at: str = Field(description="Reported timestamp")
+
+class GapAnalysis(BaseModel):
+    framework: str = Field(description="Compliance framework")
+    gaps: List[str] = Field(description="Identified compliance gaps")
+    recommendations: List[str] = Field(description="Recommended actions")
+
+class AccessReview(BaseModel):
+    user_id: str = Field(description="User identifier")
+    system: str = Field(description="System name")
+    access_level: str = Field(description="Access level (e.g., Admin, Read-Only)")
+    review_date: str = Field(description="Review timestamp")
+
+    
