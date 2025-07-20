@@ -264,3 +264,46 @@ async def get_control_mappings(framework: str) -> str:
         "ISO27001": "A.12.4: Logging and monitoring, A.14.2: Security in development"
     }
     return controls.get(framework, "No controls found")
+
+@mcp.resource("risk://register", title="Risk Register")
+async def get_risk_register(ctx: Context) -> str:
+    """Retrieve the risk register"""
+    with sqlite3.connect("server/compliance.db") as conn:
+        cursor = conn.execute("SELECT risk_id, description, severity FROM risk_register LIMIT 10")
+        risks = [f"{row[0]}: {row[1]} (Severity: {row[2]})" for row in cursor.fetchall()]
+        return "\n".join(risks) if risks else "No risks found"
+
+@mcp.resource("incident://logs", title="Incident Logs")
+async def get_incident_logs() -> str:
+    """Retrieve recent incident logs"""
+    with sqlite3.connect("server/compliance.db") as conn:
+        cursor = conn.execute("SELECT incident_id, description, status, reported_at FROM incidents ORDER BY reported_at DESC LIMIT 10")
+        incidents = [f"{row[0]}: {row[1]} ({row[2]}) at {row[3]}" for row in cursor.fetchall()]
+        return "\n".join(incidents) if incidents else "No incidents found"
+
+@mcp.resource("training://records", title="Training Records")
+async def get_training_records() -> str:
+    """Retrieve employee training records"""
+    with sqlite3.connect("server/compliance.db") as conn:
+        cursor = conn.execute("SELECT employee_id, training_name, completion_date FROM training_records ORDER BY completion_date DESC LIMIT 10")
+        records = [f"{row[0]}: {row[1]} (Completed: {row[2]})" for row in cursor.fetchall()]
+        return "\n".join(records) if records else "No training records found"
+
+@mcp.resource("vendor://{vendor_id}", title="Vendor Profile")
+async def get_vendor_profile(vendor_id: str, ctx: Context) -> str:
+    """Retrieve a vendor's compliance profile"""
+    with sqlite3.connect("server/compliance.db") as conn:
+        cursor = conn.execute("SELECT name, compliance_status FROM vendor_assessments WHERE vendor_id = ?", (vendor_id,))
+        result = cursor.fetchone()
+        return f"{result[0]}: {result[1]}" if result else "Vendor not found"
+
+@mcp.resource("data://flows", title="Data Flows")
+async def get_data_flows() -> str:
+    """Retrieve data flow mappings"""
+    return "Data Flow: CRM -> Database -> Analytics (GDPR-compliant)"
+
+@mcp.resource("encryption://standards", title="Encryption Standards")
+async def get_encryption_standards() -> str:
+    """Retrieve encryption standards for compliance"""
+    return "Standards: AES-256, RSA-2048, TLS 1.3"
+
