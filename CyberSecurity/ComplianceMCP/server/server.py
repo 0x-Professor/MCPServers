@@ -248,9 +248,9 @@ async def get_audit_logs() -> str:
         return "\n".join(logs) if logs else "No audit logs found"
 
 @mcp.resource("policy://{policy_id}", title = "Policy Document")
-async def get_policy_document(policy_id: str, ctx: Context) -> str:
+async def get_policy_document(policy_id: str) -> str:
     """Retrieve a specific policy document"""
-    db = ctx.request_context.lifespan_context["db"]
+    db = mcp.request_context.lifespan_context["db"]
     policy = db.get_policy(policy_id)
     return policy["content"] if policy else "Policy not found"
 
