@@ -227,3 +227,40 @@ class AccessReview(BaseModel):
     review_date: str = Field(description="Review timestamp")
 
     
+# Resources
+@mcp.resource("compliance://{framework}", title="Compliance Requirements")
+async def get_compliance_requirements(framework: str) -> str:
+    """Retrieve requirements for a compliance framework"""
+    requirements = {
+        "PCI-DSS": "PCI-DSS v4.0: Encryption, access control, regular audits",
+        "GDPR": "GDPR: Data minimization, consent, right to erasure",
+        "HIPAA": "HIPAA: Protected health information, risk analysis, security measures",
+        "ISO27001": "ISO 27001: Information security management, risk assessment, controls"
+    }
+    return requirements.get(framework, "Unknown framework")
+
+@mcp.resource("audit://logs", title="Audit Logs")
+async def get_audit_logs() -> str:
+    """Retrieve recent audit logs"""
+    with sqlite3.connect("server/compliance.db") as conn:
+        cursor = conn.execute("SELECT action, timestamp FROM audit_logs ORDER BY timestamp DESC LIMIT 10")
+        logs = [f"{row[0]} at {row[1]}" for row in cursor.fetchall()]
+        return "\n".join(logs) if logs else "No audit logs found"
+
+@mcp.resource("policy://{policy_id}", title = "Policy Document")
+async def get_policy_document(ploicy_id: str, ctx: Context) -> str:
+    """Retrieve a specific policy document"""
+    db = ctx.request_context.lifespan_context["db"]
+    policy = db.get_policy(policy_id)
+    return policy["connect"] if policy else "Policy not found"
+
+@mcp.resource("control://{framework}", title="Control Mappings")
+async def get_control_mappings(framework: str) -> str:
+    """Retrieve control mappings for a framework"""
+    controls = {
+        "PCI-DSS": "Requirement 1: Firewall configuration, Requirement 3: Data encryption",
+        "GDPR": "Article 5: Principles, Article 32: Security of processing",
+        "HIPAA": "164.308: Administrative safeguards, 164.312: Technical safeguards",
+        "ISO27001": "A.12.4: Logging and monitoring, A.14.2: Security in development"
+    }
+    return controls.get(framework, "No controls found")
