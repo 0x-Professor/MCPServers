@@ -248,11 +248,11 @@ async def get_audit_logs() -> str:
         return "\n".join(logs) if logs else "No audit logs found"
 
 @mcp.resource("policy://{policy_id}", title = "Policy Document")
-async def get_policy_document(ploicy_id: str, ctx: Context) -> str:
+async def get_policy_document(policy_id: str, ctx: Context) -> str:
     """Retrieve a specific policy document"""
     db = ctx.request_context.lifespan_context["db"]
     policy = db.get_policy(policy_id)
-    return policy["connect"] if policy else "Policy not found"
+    return policy["content"] if policy else "Policy not found"
 
 @mcp.resource("control://{framework}", title="Control Mappings")
 async def get_control_mappings(framework: str) -> str:
@@ -579,4 +579,4 @@ def policy_review(policy_id: str, style: str = "formal") -> str:
     }
     return f"{styles.get(style, styles['formal'])} with ID {policy_id}."
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    mcp.run()
