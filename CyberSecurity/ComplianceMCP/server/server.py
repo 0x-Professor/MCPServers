@@ -13,3 +13,15 @@ import shodan
 from datetime import datetime
 import uuid
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ComplianceMCP")
+
+# Load environment variables
+load_dotenv()
+
+# Initialize MCP server (no authentication)
+mcp = FastMCP(
+    "ComplianceManager",
+    stateless_http=True,
+)
