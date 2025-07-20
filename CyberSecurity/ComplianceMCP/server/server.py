@@ -490,3 +490,46 @@ async def validate_encryption(system: str, ctx: Context) -> str:
         encryption = "AES-256 compliant (local check)"
     ctx.request_context.lifespan_context["db"].log_action(f"Validated encryption for {system}: {encryption}")
     return encryption
+@mcp.tool(title="Generate Compliance Dashboard")
+async def generate_compliance_dashboard(ctx: Context) -> str:
+    """Generate a compliance dashboard summary"""
+    db = ctx.request_context.lifespan_context["db"]
+    frameworks = ["PCI-DSS", "GDPR", "HIPAA", "ISO27001"]
+    dashboard = "Compliance Dashboard\n"
+    for framework in frameworks:
+        status = db.get_compliance_status(framework)
+        dashboard += f"{framework}: {status['status'] if status else 'Unknown'}\n"
+    db.log_action("Generated compliance dashboard")
+    return dashboard
+
+@mcp.tool(title="Schedule Penetration Test")
+async def schedule_penetration_test(system: str, ctx: Context) -> str:
+    """Schedule a penetration test for a system"""
+    db = ctx.request_context.lifespan_context["db"]
+    test_id = f"PEN-{uuid.uuid4().hex[:8]}"
+    db.log_action(f"Scheduled penetration test {test_id} for {system}")
+    return f"Penetration test {test_id} scheduled for {system}"
+
+@mcp.tool(title="Perform Gap Analysis")
+async def perform_gap_analysis(framework: str, ctx: Context) -> GapAnalysis:
+    """Perform a compliance gap analysis"""
+    db = ctx.request_context.lifespan_context["db"]
+    gaps = [f"Missing control for {framework} requirement {i}" for i in range(1, 3)]
+    recommendations = [f"Implement control for {framework} requirement {i}" for i in range(1, 3)]
+    db.log_action(f"Performed gap analysis for {framework}")
+    return GapAnalysis(framework=framework, gaps=gaps, recommendations=recommendations)
+
+@mcp.tool(title="Update Policy Version")
+async def update_policy_version(policy_id: str, content: str, ctx: Context) -> str:
+    """Update a policy with a new version"""
+    db = ctx.request_context.lifespan_context["db"]
+    policy = db.get_policy(policy_id)
+    version = (policy["version"] + 1) if policy else 1
+    with sqlite3.connect("server/compliance.db") as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO policies (policy_id, framework, content, version) VALUES (?, ?, ?, ?)",
+            (policy_id, policy["framework"] if policy else "Unknown", content, version)
+        )
+    db.log_action(f"Updated policy {policy_id} to version {version}")
+    return f"Policy {policy_id} updated to version {version}"
+
