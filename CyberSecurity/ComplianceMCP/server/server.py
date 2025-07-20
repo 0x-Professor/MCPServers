@@ -344,3 +344,41 @@ async def check_compliance_status(framework: str, ctx: Context) -> ComplianceSta
             status=f"Error: {str(e)}",
             last_updated=str(datetime.utcnow())
         )
+
+@mcp.tool(title="Generate Compliance Report")
+async def generate_compliance_report(framework: str, ctx: Context) -> str:
+    """Generate a compliance report for a framework"""
+    db = ctx.request_context.lifespan_context["db"]
+    status = db.get_compliance_status(framework)
+    report = f"Compliance Report for {framework}\n"
+    report += f"Status: {status['status'] if status else 'Unknown'}\n"
+    report += f"Last Updated: {status['last_updated'] if status else 'N/A'}\n"
+    report += f"Requirements: {await get_compliance_requirements(framework)}"
+    db.log_action(f"Generated report for {framework}")
+    return report
+
+@mcp.tool(title="Suggest Policy Update")
+async def suggest_policy_update(framework: str, issue: str) -> PolicyUpdate:
+    """Suggest policy updates based on compliance issues"""
+    suggestions = {
+        "PCI-DSS": {
+            "encryption": PolicyUpdate(policy_id="ENC-001", suggestion="Implement AES-256 encryption", severity="High"),
+            "access": PolicyUpdate(policy_id="ACC-001", suggestion="Restrict access to cardholder data", severity="Medium")
+        },
+        "GDPR": {
+            "consent": PolicyUpdate(policy_id="GDPR-001", suggestion="Update consent forms for data processing", severity="High"),
+            "erasure": PolicyUpdate(policy_id="GDPR-002", suggestion="Implement data erasure procedures", severity="Medium")
+        },
+        "HIPAA": {
+            "phi": PolicyUpdate(policy_id="HIPAA-001", suggestion="Secure protected health information", severity="High"),
+            "risk": PolicyUpdate(policy_id="HIPAA-002", suggestion="Conduct annual risk analysis", severity="Medium")
+        },
+        "ISO27001": {
+            "controls": PolicyUpdate(policy_id="ISO-001", suggestion="Implement A.12.4 logging controls", severity="Medium"),
+            "assessment": PolicyUpdate(policy_id="ISO-002", suggestion="Perform regular risk assessments", severity="High")
+        }
+    }
+    suggestion = suggestions.get(framework, {}).get(issue, PolicyUpdate(policy_id="UNKNOWN", suggestion="No suggestion available", severity="Low"))
+    ctx.request_context.lifespan_context["db"].log_action(f"Suggested policy update for {framework}: {issue}")
+    return suggestion
+    
