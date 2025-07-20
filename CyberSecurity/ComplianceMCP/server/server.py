@@ -563,3 +563,18 @@ async def generate_audit_plan(framework: str, ctx: Context) -> str:
     db.log_action(f"Generated audit plan for {framework}")
     return plan
 
+# Prompts 
+@mcp.prompt(title="Compliance Query")
+def compliance_query(framework: str, question: str) -> str:
+    """Generate a prompt for compliance-related questions"""
+    return f"For the {framework} framework, answer the following: {question}"
+
+@mcp.prompt(title="Policy Review")
+def policy_review(policy_id: str, style: str = "formal") -> str:
+    """Generate a prompt for reviewing a policy"""
+    styles = {
+        "formal": "Please provide a formal review of the policy",
+        "technical": "Please provide a detailed technical analysis of the policy",
+        "summary": "Please provide a concise summary of the policy"
+    }
+    return f"{styles.get(style, styles['formal'])} with ID {policy_id}."
