@@ -4,6 +4,7 @@ import sqlite3
 import logging
 import aiohttp
 from typing import List, Dict, Optional
+import asyncio
 from pydantic import BaseModel, Field
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent
@@ -25,6 +26,11 @@ mcp = FastMCP(
     "ComplianceManager",
     stateless_http=True,
 )
+
+# Global variables to store dependencies
+db_instance = None
+http_session_instance = None
+shodan_api_instance = None
 
 # Database setup
 class ComplianceDB:
@@ -170,12 +176,19 @@ class ComplianceDB:
 
 # Lifespan management
 @asynccontextmanager
-async def app_lifespan(server: FastMCP) -> AsyncIterator[Dict]:
-    db = ComplianceDB("server/compliance.db")
-    async with aiohttp.ClientSession() as session:
-        shodan_api_key = os.getenv("SHODAN_API_KEY")
-        shodan_api = shodan.Shodan(shodan_api_key) if shodan_api_key else None
-        yield {"db": db, "http_session": session, "shodan": shodan_api}
+async def app_lifespan(server: FastMCP) -> AsyncIterator[None]:
+    global db_instance, http_session_instance, shodan_api_instance
+    
+    db_instance = ComplianceDB("server/compliance.db")
+    http_session_instance = aiohttp.ClientSession()
+    shodan_api_key = os.getenv("SHODAN_API_KEY")
+    shodan_api_instance = shodan.Shodan(shodan_api_key) if shodan_api_key else None
+    
+    logger.info("Server started with dependencies initialized")
+    yield
+    
+    if http_session_instance:
+        await http_session_instance.close()
     logger.info("Shutting down server")
 
 # Set lifespan
@@ -250,8 +263,10 @@ async def get_audit_logs() -> str:
 @mcp.resource("policy://{policy_id}", title="Policy Document")
 async def get_policy_document(policy_id: str) -> str:
     """Retrieve a specific policy document"""
-    db = ComplianceDB("server/compliance.db")
-    policy = db.get_policy(policy_id)
+    global db_instance
+    if not db_instance:
+        return "Database not initialized"
+    policy = db_instance.get_policy(policy_id)
     return policy["content"] if policy else "Policy not found"
 
 @mcp.resource("control://{framework}", title="Control Mappings")
@@ -292,8 +307,10 @@ async def get_training_records() -> str:
 @mcp.resource("vendor://{vendor_id}", title="Vendor Profile")
 async def get_vendor_profile(vendor_id: str) -> str:
     """Retrieve a vendor's compliance profile"""
-    db = ComplianceDB("server/compliance.db")
-    vendor = db.get_vendor_assessment(vendor_id)
+    global db_instance
+    if not db_instance:
+        return "Database not initialized"
+    vendor = db_instance.get_vendor_assessment(vendor_id)
     return f"{vendor['name']}: {vendor['compliance_status']}" if vendor else "Vendor not found"
 
 @mcp.resource("data://flows", title="Data Flows")
@@ -310,13 +327,20 @@ async def get_encryption_standards() -> str:
 @mcp.tool(title="Check Compliance Status")
 async def check_compliance_status(framework: str, ctx: Context) -> ComplianceStatus:
     """Check compliance status for a framework using Eramba API"""
-    http_session = ctx.lifespan_context["http_session"]
-    db = ctx.lifespan_context["db"]
+    global db_instance, http_session_instance
+    
+    if not db_instance:
+        return ComplianceStatus(
+            framework=framework,
+            status="Error: Database not initialized",
+            last_updated=str(datetime.utcnow())
+        )
+    
     eramba_api_key = os.getenv("ERAMBA_API_KEY")
     
-    if not eramba_api_key:
-        logger.warning("ERAMBA_API_KEY not set, using local data")
-        status = db.get_compliance_status(framework)
+    if not eramba_api_key or not http_session_instance:
+        logger.warning("ERAMBA_API_KEY not set or HTTP session not available, using local data")
+        status = db_instance.get_compliance_status(framework)
         return ComplianceStatus(
             framework=framework,
             status=status["status"] if status else "Pending",
@@ -324,13 +348,13 @@ async def check_compliance_status(framework: str, ctx: Context) -> ComplianceSta
         )
     
     try:
-        async with http_session.get(
+        async with http_session_instance.get(
             f"http://localhost:8080/api/compliance/{framework}",
             headers={"X-API-Key": eramba_api_key}
         ) as response:
             data = await response.json()
             status = data.get("status", "Pending")
-            db.log_action(f"Checked {framework} compliance: {status}")
+            db_instance.log_action(f"Checked {framework} compliance: {status}")
             return ComplianceStatus(
                 framework=framework,
                 status=status,
@@ -347,19 +371,27 @@ async def check_compliance_status(framework: str, ctx: Context) -> ComplianceSta
 @mcp.tool(title="Generate Compliance Report")
 async def generate_compliance_report(framework: str, ctx: Context) -> str:
     """Generate a compliance report for a framework"""
-    db = ctx.lifespan_context["db"]
-    status = db.get_compliance_status(framework)
+    global db_instance
+    
+    if not db_instance:
+        return "Error: Database not initialized"
+    
+    status = db_instance.get_compliance_status(framework)
     report = f"Compliance Report for {framework}\n"
     report += f"Status: {status['status'] if status else 'Unknown'}\n"
     report += f"Last Updated: {status['last_updated'] if status else 'N/A'}\n"
     report += f"Requirements: {await get_compliance_requirements(framework)}"
-    db.log_action(f"Generated report for {framework}")
+    db_instance.log_action(f"Generated report for {framework}")
     return report
 
 @mcp.tool(title="Suggest Policy Update")
 async def suggest_policy_update(framework: str, issue: str, ctx: Context) -> PolicyUpdate:
     """Suggest policy updates based on compliance issues"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
+    if db_instance:
+        db_instance.log_action(f"Suggested policy update for {framework}: {issue}")
+    
     suggestions = {
         "PCI-DSS": {
             "encryption": PolicyUpdate(policy_id="ENC-001", suggestion="Implement AES-256 encryption", severity="High"),
@@ -378,37 +410,39 @@ async def suggest_policy_update(framework: str, issue: str, ctx: Context) -> Pol
             "assessment": PolicyUpdate(policy_id="ISO-002", suggestion="Perform regular risk assessments", severity="High")
         }
     }
-    suggestion = suggestions.get(framework, {}).get(issue, PolicyUpdate(policy_id="UNKNOWN", suggestion="No suggestion available", severity="Low"))
-    db.log_action(f"Suggested policy update for {framework}: {issue}")
-    return suggestion
+    return suggestions.get(framework, {}).get(issue, PolicyUpdate(policy_id="UNKNOWN", suggestion="No suggestion available", severity="Low"))
 
 @mcp.tool(title="Assess Risk")
 async def assess_risk(description: str, ctx: Context) -> RiskAssessment:
     """Assess a new risk and assign severity"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     risk_id = f"RISK-{hash(description) % 10000}"
     severity = "High" if "critical" in description.lower() else "Medium"
     mitigation = "Implement controls and monitor" if severity == "High" else "Review and document"
-    with sqlite3.connect("server/compliance.db") as conn:
-        conn.execute(
-            "INSERT INTO risk_register (risk_id, description, severity) VALUES (?, ?, ?)",
-            (risk_id, description, severity)
-        )
-    db.log_action(f"Assessed risk {risk_id}")
+    
+    if db_instance:
+        with sqlite3.connect("server/compliance.db") as conn:
+            conn.execute(
+                "INSERT INTO risk_register (risk_id, description, severity) VALUES (?, ?, ?)",
+                (risk_id, description, severity)
+            )
+        db_instance.log_action(f"Assessed risk {risk_id}")
+    
     return RiskAssessment(risk_id=risk_id, description=description, severity=severity, mitigation=mitigation)
 
 @mcp.tool(title="Collect Evidence")
 async def collect_evidence(framework: str, evidence_type: str, ctx: Context) -> EvidenceRecord:
     """Collect evidence for a compliance framework using Eramba API"""
-    db = ctx.lifespan_context["db"]
-    http_session = ctx.lifespan_context["http_session"]
+    global db_instance, http_session_instance
+    
     eramba_api_key = os.getenv("ERAMBA_API_KEY")
     evidence_id = f"EVID-{hash(framework + evidence_type) % 10000}"
     description = f"Evidence for {evidence_type} in {framework}"
     
-    if eramba_api_key:
+    if eramba_api_key and http_session_instance:
         try:
-            async with http_session.post(
+            async with http_session_instance.post(
                 f"http://localhost:8080/api/evidence",
                 headers={"X-API-Key": eramba_api_key},
                 json={"framework": framework, "evidence_type": evidence_type}
@@ -418,152 +452,208 @@ async def collect_evidence(framework: str, evidence_type: str, ctx: Context) -> 
         except Exception as e:
             logger.error(f"Eramba API error: {str(e)}")
     
-    db.log_action(f"Collected evidence {evidence_id}")
+    if db_instance:
+        db_instance.log_action(f"Collected evidence {evidence_id}")
+    
     return EvidenceRecord(evidence_id=evidence_id, framework=framework, description=description, collected_at=str(datetime.utcnow()))
 
 @mcp.tool(title="Validate Control")
 async def validate_control(control_id: str, framework: str, ctx: Context) -> ControlValidation:
     """Validate a compliance control"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     status = "Pass" if control_id.startswith("C") else "Pending"
     details = f"Control {control_id} validated for {framework}"
-    db.log_action(f"Validated control {control_id}")
+    
+    if db_instance:
+        db_instance.log_action(f"Validated control {control_id}")
+    
     return ControlValidation(control_id=control_id, framework=framework, status=status, details=details)
 
 @mcp.tool(title="Report Incident")
 async def report_incident(description: str, ctx: Context) -> IncidentReport:
     """Report a new compliance incident"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     incident_id = f"INC-{hash(description) % 10000}"
     status = "Open"
-    with sqlite3.connect("server/compliance.db") as conn:
-        conn.execute(
-            "INSERT INTO incidents (incident_id, description, status) VALUES (?, ?, ?)",
-            (incident_id, description, status)
-        )
-    db.log_action(f"Reported incident {incident_id}")
+    
+    if db_instance:
+        with sqlite3.connect("server/compliance.db") as conn:
+            conn.execute(
+                "INSERT INTO incidents (incident_id, description, status) VALUES (?, ?, ?)",
+                (incident_id, description, status)
+            )
+        db_instance.log_action(f"Reported incident {incident_id}")
+    
     return IncidentReport(incident_id=incident_id, description=description, status=status, reported_at=str(datetime.utcnow()))
 
 @mcp.tool(title="Track Training")
 async def track_training(employee_id: str, training_name: str, ctx: Context) -> str:
     """Track employee compliance training"""
-    db = ctx.lifespan_context["db"]
-    with sqlite3.connect("server/compliance.db") as conn:
-        conn.execute(
-            "INSERT INTO training_records (employee_id, training_name, completion_date) VALUES (?, ?, ?)",
-            (employee_id, training_name, str(datetime.utcnow()))
-        )
-    db.log_action(f"Tracked training for {employee_id}: {training_name}")
+    global db_instance
+    
+    if db_instance:
+        with sqlite3.connect("server/compliance.db") as conn:
+            conn.execute(
+                "INSERT INTO training_records (employee_id, training_name, completion_date) VALUES (?, ?, ?)",
+                (employee_id, training_name, str(datetime.utcnow()))
+            )
+        db_instance.log_action(f"Tracked training for {employee_id}: {training_name}")
+    
     return f"Training {training_name} recorded for {employee_id}"
 
 @mcp.tool(title="Assess Vendor")
 async def assess_vendor(vendor_id: str, name: str, ctx: Context) -> str:
     """Assess a vendor's compliance status"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     status = "Compliant" if vendor_id.startswith("V") else "Non-Compliant"
-    with sqlite3.connect("server/compliance.db") as conn:
-        conn.execute(
-            "INSERT INTO vendor_assessments (vendor_id, name, compliance_status) VALUES (?, ?, ?)",
-            (vendor_id, name, status)
-        )
-    db.log_action(f"Assessed vendor {vendor_id}: {status}")
+    
+    if db_instance:
+        with sqlite3.connect("server/compliance.db") as conn:
+            conn.execute(
+                "INSERT INTO vendor_assessments (vendor_id, name, compliance_status) VALUES (?, ?, ?)",
+                (vendor_id, name, status)
+            )
+        db_instance.log_action(f"Assessed vendor {vendor_id}: {status}")
+    
     return f"Vendor {name} assessed as {status}"
 
 @mcp.tool(title="Map Data Flow")
 async def map_data_flow(source: str, destination: str, ctx: Context) -> str:
     """Map a data flow for GDPR compliance"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     flow = f"Data Flow: {source} -> {destination}"
-    db.log_action(f"Mapped data flow: {flow}")
+    
+    if db_instance:
+        db_instance.log_action(f"Mapped data flow: {flow}")
+    
     return flow
 
 @mcp.tool(title="Validate Encryption")
 async def validate_encryption(system: str, ctx: Context) -> str:
     """Validate encryption standards for a system"""
-    shodan_api = ctx.lifespan_context["shodan"]
-    db = ctx.lifespan_context["db"]
-    if shodan_api and system:
+    global db_instance, shodan_api_instance
+    
+    if shodan_api_instance and system:
         try:
-            results = shodan_api.search(f"hostname:{system}")
-            encryption = "TLS 1.3 detected" if any("ssl" in result for result in results["matches"]) else "No encryption detected"
-        except shodan.APIError as e:
+            results = shodan_api_instance.search(f"hostname:{system}")
+            encryption = "TLS 1.3 detected" if any("ssl" in str(result) for result in results["matches"]) else "No encryption detected"
+        except Exception as e:
             encryption = f"Shodan error: {str(e)}"
     else:
         encryption = "AES-256 compliant (local check)"
-    db.log_action(f"Validated encryption for {system}: {encryption}")
+    
+    if db_instance:
+        db_instance.log_action(f"Validated encryption for {system}: {encryption}")
+    
     return encryption
 
 @mcp.tool(title="Generate Compliance Dashboard")
 async def generate_compliance_dashboard(ctx: Context) -> str:
     """Generate a compliance dashboard summary"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     frameworks = ["PCI-DSS", "GDPR", "HIPAA", "ISO27001"]
     dashboard = "Compliance Dashboard\n"
-    for framework in frameworks:
-        status = db.get_compliance_status(framework)
-        dashboard += f"{framework}: {status['status'] if status else 'Unknown'}\n"
-    db.log_action("Generated compliance dashboard")
+    
+    if db_instance:
+        for framework in frameworks:
+            status = db_instance.get_compliance_status(framework)
+            dashboard += f"{framework}: {status['status'] if status else 'Unknown'}\n"
+        db_instance.log_action("Generated compliance dashboard")
+    else:
+        dashboard += "Database not initialized\n"
+    
     return dashboard
 
 @mcp.tool(title="Schedule Penetration Test")
 async def schedule_penetration_test(system: str, ctx: Context) -> str:
     """Schedule a penetration test for a system"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     test_id = f"PEN-{uuid.uuid4().hex[:8]}"
-    db.log_action(f"Scheduled penetration test {test_id} for {system}")
+    
+    if db_instance:
+        db_instance.log_action(f"Scheduled penetration test {test_id} for {system}")
+    
     return f"Penetration test {test_id} scheduled for {system}"
 
 @mcp.tool(title="Perform Gap Analysis")
 async def perform_gap_analysis(framework: str, ctx: Context) -> GapAnalysis:
     """Perform a compliance gap analysis"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     gaps = [f"Missing control for {framework} requirement {i}" for i in range(1, 3)]
     recommendations = [f"Implement control for {framework} requirement {i}" for i in range(1, 3)]
-    db.log_action(f"Performed gap analysis for {framework}")
+    
+    if db_instance:
+        db_instance.log_action(f"Performed gap analysis for {framework}")
+    
     return GapAnalysis(framework=framework, gaps=gaps, recommendations=recommendations)
 
 @mcp.tool(title="Update Policy Version")
 async def update_policy_version(policy_id: str, content: str, ctx: Context) -> str:
     """Update a policy with a new version"""
-    db = ctx.lifespan_context["db"]
-    policy = db.get_policy(policy_id)
+    global db_instance
+    
+    if not db_instance:
+        return f"Error: Database not initialized"
+    
+    policy = db_instance.get_policy(policy_id)
     version = (policy["version"] + 1) if policy else 1
+    
     with sqlite3.connect("server/compliance.db") as conn:
         conn.execute(
             "INSERT OR REPLACE INTO policies (policy_id, framework, content, version) VALUES (?, ?, ?, ?)",
             (policy_id, policy["framework"] if policy else "Unknown", content, version)
         )
-    db.log_action(f"Updated policy {policy_id} to version {version}")
+    
+    db_instance.log_action(f"Updated policy {policy_id} to version {version}")
     return f"Policy {policy_id} updated to version {version}"
 
 @mcp.tool(title="Simulate Data Breach")
 async def simulate_data_breach(system: str, ctx: Context) -> str:
     """Simulate a data breach scenario"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     breach_id = f"BRCH-{uuid.uuid4().hex[:8]}"
-    db.log_action(f"Simulated data breach {breach_id} on {system}")
+    
+    if db_instance:
+        db_instance.log_action(f"Simulated data breach {breach_id} on {system}")
+    
     return f"Simulated data breach {breach_id} on {system}: Review incident response plan"
 
 @mcp.tool(title="Review Access Controls")
 async def review_access_controls(user_id: str, system: str, ctx: Context) -> AccessReview:
     """Review access controls for a user and system"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     access_level = "Admin" if user_id.startswith("A") else "Read-Only"
-    with sqlite3.connect("server/compliance.db") as conn:
-        conn.execute(
-            "INSERT INTO access_reviews (user_id, system, access_level, review_date) VALUES (?, ?, ?, ?)",
-            (user_id, system, access_level, str(datetime.utcnow()))
-        )
-    db.log_action(f"Reviewed access for {user_id} on {system}")
+    
+    if db_instance:
+        with sqlite3.connect("server/compliance.db") as conn:
+            conn.execute(
+                "INSERT INTO access_reviews (user_id, system, access_level, review_date) VALUES (?, ?, ?, ?)",
+                (user_id, system, access_level, str(datetime.utcnow()))
+            )
+        db_instance.log_action(f"Reviewed access for {user_id} on {system}")
+    
     return AccessReview(user_id=user_id, system=system, access_level=access_level, review_date=str(datetime.utcnow()))
 
 @mcp.tool(title="Generate Audit Plan")
 async def generate_audit_plan(framework: str, ctx: Context) -> str:
     """Generate an audit plan for a framework"""
-    db = ctx.lifespan_context["db"]
+    global db_instance
+    
     plan = f"Audit Plan for {framework}\n"
     plan += "1. Review compliance status\n2. Collect evidence\n3. Validate controls\n4. Assess risks"
-    db.log_action(f"Generated audit plan for {framework}")
+    
+    if db_instance:
+        db_instance.log_action(f"Generated audit plan for {framework}")
+    
     return plan
 
 # Prompts
