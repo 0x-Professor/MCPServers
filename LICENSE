@@ -1,0 +1,46 @@
+MIT License
+
+Copyright (c) 2025 Muhammad Mazhar Saeed (Professor)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ADDITIONAL DISCLAIMERS FOR CYBERSECURITY AND BLOCKCHAIN COMPONENTS:
+
+1. CYBERSECURITY TOOLS: The network scanning, penetration testing, and vulnerability 
+   assessment tools included in this software are intended for authorized security 
+   testing only. Users are solely responsible for ensuring they have proper 
+   authorization before scanning or testing any systems. Unauthorized use may 
+   violate applicable laws including the Computer Fraud and Abuse Act (CFAA) and 
+   similar international legislation.
+
+2. BLOCKCHAIN OPERATIONS: The smart contract auditing, cross-chain bridge, and 
+   cryptocurrency wallet functionalities are provided for educational and development 
+   purposes. Users assume all risks associated with blockchain transactions, smart 
+   contract interactions, and digital asset management. The authors are not 
+   responsible for any financial losses, security breaches, or regulatory violations.
+
+3. COMPLIANCE MONITORING: The compliance and regulatory monitoring tools provide 
+   informational assistance only and do not constitute legal advice. Users must 
+   consult with qualified legal professionals for compliance requirements specific 
+   to their jurisdiction and use case.
+
+4. THIRD-PARTY INTEGRATIONS: This software integrates with external APIs and services 
+   (Alchemy, OpenSea, Shodan, etc.). Users are responsible for complying with the 
+   terms of service of these third-party providers and for obtaining necessary 
+   API keys and permissions.
