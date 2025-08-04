@@ -1,0 +1,6 @@
+# Demo Requirements
+# Interactive demonstration scripts for MCP Servers
+
+rich>=13.0.0
+asyncio
+typing-extensions>=4.0.0

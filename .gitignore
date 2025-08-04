@@ -1,3 +1,8 @@
 ./Blockchain/server/.env
 # Ignore environment variable files
 ./Blockchain/server/.env.local
+
+# Demo temporary files
+demos/*.log
+demos/temp/
+demos/__pycache__/
